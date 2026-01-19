@@ -71,25 +71,51 @@ function clampInt(n, min, max, fallback = 0) {
   return Math.max(min, Math.min(max, Math.trunc(x)));
 }
 
+function recomputeScores(st) {
+  const cp = clampInt(st.rules?.correctPoints, -1000, 1000000, 1);
+  const wp = clampInt(st.rules?.wrongPoints, -1000, 1000000, -1);
+
+  for (const p of Object.values(st.players || {})) {
+    const c = clampInt(p.correctCount, 0, 1000000, 0);
+    const w = clampInt(p.wrongCount, 0, 1000000, 0);
+    p.correctCount = c;
+    p.wrongCount = w;
+    p.score = c * cp + w * wp;
+  }
+}
+
 function recomputePlayerStatuses(st) {
   const rules = st.rules || {};
+
   const qualifyEnabled = !!rules.qualifyEnabled;
   const dqEnabled = !!rules.dqEnabled;
   const qualifyScore = clampInt(rules.qualifyScore, -1000, 1000000, 4);
   const dqScore = clampInt(rules.dqScore, -1000, 1000000, -3);
 
+  const qualifyCountEnabled = !!rules.qualifyCountEnabled;
+  const qualifyCorrectCount = clampInt(rules.qualifyCorrectCount, 0, 1000000, 4);
+
+  const dqWrongEnabled = !!rules.dqWrongEnabled;
+  const dqWrongCount = clampInt(rules.dqWrongCount, 0, 1000000, 3);
+
   const cp = clampInt(rules.correctPoints, -1000, 1000000, 1);
   const wp = clampInt(rules.wrongPoints, -1000, 1000000, -1);
 
-  // 1) qualifiedAt / dqAt の付与・解除（スコア変更で即追随）
+  // 1) qualifiedAt / dqAt の付与・解除
   for (const p of Object.values(st.players || {})) {
     const score = Number(p.score ?? 0);
+    const correctCount = Number(p.correctCount ?? 0);
+    const wrongCount = Number(p.wrongCount ?? 0);
 
-    const isQualify = qualifyEnabled && score >= qualifyScore;
-    const isDq = dqEnabled && score <= dqScore;
+    const isQualify =
+      (qualifyEnabled && score >= qualifyScore) ||
+      (qualifyCountEnabled && correctCount >= qualifyCorrectCount);
 
-    // 失格と勝ち抜けが同時に成立しうる場合の優先（通常は起きないが保険）
-    // ここでは失格を優先
+    const isDq =
+      (dqEnabled && score <= dqScore) ||
+      (dqWrongEnabled && wrongCount >= dqWrongCount);
+
+    // 同時成立は失格優先
     if (isDq) {
       if (!p.dqAt) p.dqAt = Date.now();
       p.qualifiedAt = null;
@@ -103,25 +129,25 @@ function recomputePlayerStatuses(st) {
     }
   }
 
-  // 2) 勝ち抜け順位（qualifiedAt の早い順）
+  // 2) 勝ち抜け順位
   const qualified = Object.values(st.players || {})
     .filter(p => p.qualifiedAt)
     .sort((a, b) => a.qualifiedAt - b.qualifiedAt);
 
-  qualified.forEach((p, idx) => {
-    p.passRank = idx + 1;
-  });
-
+  qualified.forEach((p, idx) => { p.passRank = idx + 1; });
   for (const p of Object.values(st.players || {})) {
     if (!p.qualifiedAt) p.passRank = null;
   }
 
-  // 3) status と reach（表示用）を付与
+  // 3) status と reach
   const qualifyReachEnabled = !!rules.qualifyReachEnabled;
   const dqReachEnabled = !!rules.dqReachEnabled;
 
   for (const p of Object.values(st.players || {})) {
     const score = Number(p.score ?? 0);
+    const correctCount = Number(p.correctCount ?? 0);
+    const wrongCount = Number(p.wrongCount ?? 0);
+
     const isQualified = !!p.qualifiedAt;
     const isDisqualified = !!p.dqAt;
 
@@ -129,15 +155,21 @@ function recomputePlayerStatuses(st) {
     else if (isQualified) p.status = "qualified";
     else p.status = "active";
 
-    // リーチ（まだ active の時だけ）
     p.reach = { qualify: false, dq: false };
 
     if (p.status === "active") {
       if (qualifyEnabled && qualifyReachEnabled) {
         if (score + cp >= qualifyScore) p.reach.qualify = true;
       }
+      if (qualifyCountEnabled && qualifyReachEnabled) {
+        if (correctCount + 1 >= qualifyCorrectCount) p.reach.qualify = true;
+      }
+
       if (dqEnabled && dqReachEnabled) {
         if (score + wp <= dqScore) p.reach.dq = true;
+      }
+      if (dqWrongEnabled && dqReachEnabled) {
+        if (wrongCount + 1 >= dqWrongCount) p.reach.dq = true;
       }
     }
   }
@@ -282,6 +314,16 @@ function createWsServer(httpServer) {
     if (!st.judge) st.judge = {};
     if (st.rules.autoNextEnabled == null) st.rules.autoNextEnabled = false; // デフォ: 手動
     if (st.rules.autoNextDelayMs == null) st.rules.autoNextDelayMs = 800;   // 自動ON時の待ち
+    if (!st.ui) st.ui = {};
+    if (st.ui.showScore == null) st.ui.showScore = true;
+    if (st.ui.showWrongCount == null) st.ui.showWrongCount = true;
+    if (st.ui.showMarks == null) st.ui.showMarks = false;
+    if (st.ui.showMarkCorrect == null) st.ui.showMarkCorrect = true;
+    if (st.ui.showMarkWrong == null) st.ui.showMarkWrong = true;
+
+    if (st.ui.joinQrVisible == null) st.ui.joinQrVisible = false;
+    if (st.ui.joinQrTargetUrl == null) st.ui.joinQrTargetUrl = null;
+    if (st.ui.joinQrDataUrl == null) st.ui.joinQrDataUrl = null;
 
     if (st.questionNo == null) st.questionNo = 1;
 
@@ -410,6 +452,8 @@ function createWsServer(httpServer) {
           st.players[playerId] = {
             id: playerId,
             name,
+            correctCount: 0,
+            wrongCount: 0,
             score: 0,
             restCount: 0,
             pendingRestAdd: 0
@@ -509,10 +553,12 @@ function createWsServer(httpServer) {
         if (!cur) return;
 
         const p = st.players[cur.playerId];
-        if (p) p.score = Number(p.score ?? 0) + Number(st.rules?.correctPoints ?? 1);
+        if (p) {
+          p.correctCount = Number(p.correctCount ?? 0) + 1;
+        }
+        recomputeScores(st);
 
         emitSfx(st, "correct");
-
         recomputePlayerStatuses(st);
         setResult(st, { type: "correct", playerId: cur.playerId });
         broadcastState();
@@ -527,7 +573,10 @@ function createWsServer(httpServer) {
         if (!cur) return;
 
         const p = st.players[cur.playerId];
-        if (p) p.score = Number(p.score ?? 0) + Number(st.rules?.wrongPoints ?? -1);
+        if (p) {
+          p.wrongCount = Number(p.wrongCount ?? 0) + 1;
+        }
+        recomputeScores(st);
 
         // 誤答罰：次問から休みを付与
         const penalty = Number(st.rules?.restPenalty ?? 0);
@@ -636,20 +685,20 @@ function createWsServer(httpServer) {
         broadcastState();
         return;
       }
-      if (type === "SET_SCORE") {
+      if (type === "SET_COUNTS") {
         if (ws.meta.screen !== "controller") return;
 
         const playerId = String(msg.playerId || "");
         const p = st.players?.[playerId];
         if (!p) return;
 
-        const n = Number(msg.score);
-        if (!Number.isFinite(n)) return;
+        const c = clampInt(msg.correctCount, 0, 1000000, 0);
+        const w = clampInt(msg.wrongCount, 0, 1000000, 0);
 
-        // 必要なら範囲を制限（例：-999～999）
-        const clamped = Math.max(-999, Math.min(999, Math.trunc(n)));
-        p.score = clamped;
+        p.correctCount = c;
+        p.wrongCount = w;
 
+        recomputeScores(st);
         recomputePlayerStatuses(st);
         broadcastState();
         return;
@@ -660,7 +709,8 @@ function createWsServer(httpServer) {
         st.rules.correctPoints = clampRulePoints(msg.correctPoints);
         st.rules.wrongPoints = clampRulePoints(msg.wrongPoints);
 
-        recomputePlayerStatuses(st)
+        recomputeScores(st);
+        recomputePlayerStatuses(st);
         broadcastState();
         return;
       }
@@ -680,21 +730,48 @@ function createWsServer(httpServer) {
         broadcastState();
         return;
       }
+      if (type === "SET_RULE_COUNTS") {
+        st.rules.qualifyCountEnabled = !!msg.qualifyCountEnabled;
+        st.rules.qualifyCorrectCount = Number(msg.qualifyCorrectCount ?? 0);
+
+        st.rules.dqWrongEnabled = !!msg.dqWrongEnabled;
+        st.rules.dqWrongCount = Number(msg.dqWrongCount ?? 0);
+
+        recomputePlayerStatuses(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === "SET_UI_PREFS") {
+        st.ui = st.ui || {};
+
+        st.ui.showScore = msg.showScore !== false;
+        st.ui.showWrongCount = msg.showWrongCount !== false;
+        st.ui.showMarks = !!msg.showMarks;
+        st.ui.showMarkCorrect = msg.showMarkCorrect !== false;
+        st.ui.showMarkWrong = msg.showMarkWrong !== false;
+
+        broadcastState();
+        return;
+      }
       if (type === "AC_RESET") {
         if (ws.meta.screen !== "controller") return;
 
         for (const p of Object.values(st.players || {})) {
+          p.correctCount = 0;
+          p.wrongCount = 0;
           p.score = 0;
+
           p.qualifiedAt = null;
           p.dqAt = null;
           p.passRank = null;
           p.status = "active";
           p.reach = { qualify: false, dq: false };
 
-          // ついでに休みも消したいなら（おすすめ）
           p.restCount = 0;
           p.pendingRestAdd = 0;
         }
+        recomputeScores(st);
 
         // 問題中の判定も安全側でリセット（おすすめ）
         resetBuzzer(st);

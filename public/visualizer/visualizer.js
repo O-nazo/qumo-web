@@ -91,6 +91,18 @@ function renderPlayers(st) {
   const currentPlayerId = cur?.playerId ?? null;
   const wrongSet = st.judge?.wrongSet || {};
 
+  const ui = st.ui || {};
+  const showScore = ui.showScore !== false;
+  const showWrongCount = ui.showWrongCount !== false;
+  const showMarks = !!ui.showMarks;
+  const showMarkCorrect = ui.showMarkCorrect !== false;
+  const showMarkWrong = ui.showMarkWrong !== false;
+  
+  function repeatSafe(ch, n, max = 30) {
+    const k = Math.max(0, Math.min(Number(n ?? 0) | 0, max));
+    return k > 0 ? ch.repeat(k) : "";
+  }
+
   for (const p of sorted) {
     const info = orderMap.get(p.id) || null;
     const order = info ? info.order : null;
@@ -110,6 +122,13 @@ function renderPlayers(st) {
     const status = p.status || "active";
     const isQualified = status === "qualified";
     const isDq = status === "disqualified";
+
+    const correctCount = Number(p.correctCount ?? 0);
+    const wrongCount = Number(p.wrongCount ?? 0);
+
+    const marks = showMarks
+      ? `${showMarkCorrect ? repeatSafe("○", correctCount) : ""}${showMarkWrong ? repeatSafe("×", wrongCount) : ""}`.trim()
+      : "";
 
     const reachWin = !!p.reach?.qualify;
     const reachLose = !!p.reach?.dq;
@@ -133,8 +152,26 @@ function renderPlayers(st) {
       <div class="nameRow">
         <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
         ${reachHtml}
-        <div class="score">${Number(p.score ?? 0)}</div>
+        ${showScore ? `<div class="score">${Number(p.score ?? 0)}</div>` : ``}
       </div>
+
+      ${(showWrongCount || showMarks) ? `
+      <div class="meta">
+        ${showWrongCount ? `
+        <div class="kv">
+          <div class="k">誤答</div>
+          <div class="v">${wrongCount}</div>
+        </div>
+        ` : ``}
+
+        ${showMarks ? `
+        <div class="kv">
+          <div class="k">○×</div>
+          <div class="v">${escapeHtml(marks || "-")}</div>
+        </div>
+        ` : ``}
+      </div>
+      ` : ``}
 
       <div class="meta">
         <div class="kv">
@@ -145,9 +182,9 @@ function renderPlayers(st) {
           <div class="k">先着差</div>
           <div class="v">${gapText}</div>
         </div>
-        <div class="kv2">
-          <div class="k2">休み</div>
-          <div class="v2">${restCount}</div>
+        <div class="kv">
+          <div class="k">休み</div>
+          <div class="v">${restCount}</div>
         </div>
       </div>
     `;

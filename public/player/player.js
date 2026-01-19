@@ -11,6 +11,7 @@ const restEl = document.querySelector("#rest");
 const rankEl = document.querySelector("#rank");
 const gapEl = document.querySelector("#gap");
 const pointRankEl = document.querySelector("#pointRank");
+const wrongCountEl = document.querySelector("#wrongCount");
 
 const client = createClient({ screen: "player", autoJoin: false });
 
@@ -237,6 +238,10 @@ client.onState((st) => {
 
   const score = Number(my?.score ?? 0);
   scoreEl.textContent = String(score);
+
+  wrongCountEl.textContent = String(my?.wrongCount ?? 0);
+  wrongCountEl.parentElement.style.display =
+    st.ui?.showWrongCount !== false ? "" : "none";
 
   const restCount = Number(my?.restCount ?? 0);
   restEl.textContent = `休み あと${restCount}問`;

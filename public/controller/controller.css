@@ -91,13 +91,13 @@
 
 .tile.resting { opacity: 0.55; }
 
-.scoreEdit {
+.countEdit {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.scoreInput {
+.countInput {
   width: 72px;
   padding: 4px 6px;
   font-weight: 800;
@@ -105,7 +105,7 @@
   text-align: right;
 }
 
-.scoreBtn {
+.countBtn {
   width: 30px;
   height: 30px;
   border-radius: 8px;
@@ -176,5 +176,43 @@ button.danger:active {
 .reach-lose {
   background: #c62828;
   color: #fff;
+}
+
+.tile .row1{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.tile .row1 .name{
+  flex:1;
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.tile .row1 .right{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.tile .row2,.tile .row3{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-top:4px;
+}
+.tile .label{
+  width:3em;
+  opacity:0.8;
+}
+.tile .countEdit{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.tile .countInput{
+  width:72px;
 }
 

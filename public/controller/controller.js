@@ -42,6 +42,17 @@ const els = {
   qualifyScore: document.querySelector("#qualifyScore"),
   dqEnabled: document.querySelector("#dqEnabled"),
   dqScore: document.querySelector("#dqScore"),
+  qualifyCountEnabled: document.querySelector("#qualifyCountEnabled"),
+  qualifyCorrectCount: document.querySelector("#qualifyCorrectCount"),
+  dqWrongEnabled: document.querySelector("#dqWrongEnabled"),
+  dqWrongCount: document.querySelector("#dqWrongCount"),
+
+  showScore: document.querySelector("#showScore"),
+  showWrongCount: document.querySelector("#showWrongCount"),
+  showMarks: document.querySelector("#showMarks"),
+  showMarkCorrect: document.querySelector("#showMarkCorrect"),
+  showMarkWrong: document.querySelector("#showMarkWrong"),
+
   qualifyReachEnabled: document.querySelector("#qualifyReachEnabled"),
   dqReachEnabled: document.querySelector("#dqReachEnabled"),
   acReset: document.querySelector("#acReset"),
@@ -101,6 +112,22 @@ els.toggleJoinQr.addEventListener("click", () => {
   els.dqReachEnabled
 ].forEach(el => el.addEventListener("change", emitAdvanceRules));
 
+[
+  els.qualifyCountEnabled,
+  els.qualifyCorrectCount,
+  els.dqWrongEnabled,
+  els.dqWrongCount
+].forEach(el => el?.addEventListener("change", emitCountRules));
+
+[
+  els.showScore,
+  els.showWrongCount,
+  els.showMarks,
+  els.showMarkCorrect,
+  els.showMarkWrong
+].forEach(el => el?.addEventListener("change", emitUiPrefs));
+
+
 els.acReset.addEventListener("click", () => {
   if (!confirm("本当にリセットしますか？")) return;
   client.emit("AC_RESET");
@@ -113,14 +140,18 @@ function emitRulePoints() {
   });
 }
 
-function clampScore(n) {
+function clampCount(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return 0;
-  return Math.max(-999, Math.min(999, Math.trunc(x)));
+  return Math.max(0, Math.min(999, Math.trunc(x)));
 }
 
-function setScore(playerId, score) {
-  client.emit("SET_SCORE", { playerId, score: clampScore(score) });
+function setCounts(playerId, correctCount, wrongCount) {
+  client.emit("SET_COUNTS", {
+    playerId,
+    correctCount: clampCount(correctCount),
+    wrongCount: clampCount(wrongCount)
+  });
 }
 
 function renderJoinUrls(st) {
@@ -149,6 +180,25 @@ function emitAdvanceRules() {
 
     qualifyReachEnabled: els.qualifyReachEnabled.checked,
     dqReachEnabled: els.dqReachEnabled.checked
+  });
+}
+
+function emitCountRules() {
+  client.emit("SET_RULE_COUNTS", {
+    qualifyCountEnabled: els.qualifyCountEnabled.checked,
+    qualifyCorrectCount: Number(els.qualifyCorrectCount.value),
+    dqWrongEnabled: els.dqWrongEnabled.checked,
+    dqWrongCount: Number(els.dqWrongCount.value)
+  });
+}
+
+function emitUiPrefs() {
+  client.emit("SET_UI_PREFS", {
+    showScore: els.showScore.checked,
+    showWrongCount: els.showWrongCount.checked,
+    showMarks: els.showMarks.checked,
+    showMarkCorrect: els.showMarkCorrect.checked,
+    showMarkWrong: els.showMarkWrong.checked
   });
 }
 
@@ -245,14 +295,34 @@ function renderPlayersGrid(st) {
       (isCorrect ? " correct" : "") +
       (isResting ? " resting" : "");
 
+    const correctCount = Number(p.correctCount ?? 0);
+    const wrongCount = Number(p.wrongCount ?? 0);
+    const score = Number(p.score ?? 0);
+
     tile.innerHTML = `
-      <div class="nameRow">
+      <div class="row1">
         <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
-        ${reachHtml}
-        <div class="scoreEdit">
-          <button class="scoreBtn" data-delta="-1" title="-1">-</button>
-          <input class="scoreInput" type="number" min="-999" max="999" step="1" value="${Number(p.score ?? 0)}" />
-          <button class="scoreBtn" data-delta="1" title="+1">+</button>
+        <div class="right">
+          ${reachHtml}
+          <div class="score">${score}</div>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="label">正答</div>
+        <div class="countEdit">
+          <button class="countBtn" data-kind="correct" data-delta="-1" title="-1">-</button>
+          <input class="countInput" data-kind="correct" type="number" min="0" max="999" step="1" value="${correctCount}" />
+          <button class="countBtn" data-kind="correct" data-delta="1" title="+1">+</button>
+        </div>
+      </div>
+
+      <div class="row3">
+        <div class="label">誤答</div>
+        <div class="countEdit">
+          <button class="countBtn" data-kind="wrong" data-delta="-1" title="-1">-</button>
+          <input class="countInput" data-kind="wrong" type="number" min="0" max="999" step="1" value="${wrongCount}" />
+          <button class="countBtn" data-kind="wrong" data-delta="1" title="+1">+</button>
         </div>
       </div>
 
@@ -269,34 +339,39 @@ function renderPlayersGrid(st) {
           <div class="k2">休み</div>
           <div class="v2">${restCount}</div>
         </div>
-
       </div>
     `;
 
-    const scoreInput = tile.querySelector(".scoreInput");
+    const getInput = (kind) => tile.querySelector(`.countInput[data-kind="${kind}"]`);
 
-    scoreInput.addEventListener("change", () => {
-      setScore(p.id, scoreInput.value);
-    });
+    function commitCounts() {
+      const c = getInput("correct")?.value ?? 0;
+      const w = getInput("wrong")?.value ?? 0;
+      setCounts(p.id, c, w);
+    }
 
-    // Enterでも確定したい場合
-    scoreInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        scoreInput.blur();
-      }
-    });
-
-    // ±ボタン
-    for (const btn of tile.querySelectorAll(".scoreBtn")) {
-      btn.addEventListener("click", () => {
-        const delta = Number(btn.dataset.delta || 0);
-        const cur = clampScore(scoreInput.value);
-        const next = clampScore(cur + delta);
-        scoreInput.value = String(next);
-        setScore(p.id, next);
+    for (const inp of tile.querySelectorAll(".countInput")) {
+      inp.addEventListener("change", commitCounts);
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") inp.blur();
       });
     }
 
+    for (const btn of tile.querySelectorAll(".countBtn")) {
+      btn.addEventListener("click", () => {
+        const kind = String(btn.dataset.kind || "");
+        const delta = Number(btn.dataset.delta || 0);
+
+        const inp = getInput(kind);
+        if (!inp) return;
+
+        const cur = clampCount(inp.value);
+        const next = clampCount(cur + delta);
+        inp.value = String(next);
+
+        commitCounts();
+      });
+    }
 
     grid.appendChild(tile);
   }
@@ -342,6 +417,17 @@ client.onState((st) => {
   els.thinkingSeconds.value = String(st.rules?.thinkingSeconds ?? 5);
   els.correctPoints.value = String(st.rules?.correctPoints ?? 1);
   els.wrongPoints.value = String(st.rules?.wrongPoints ?? -1);
+  // 回数ルール
+  els.qualifyCountEnabled.checked = !!st.rules?.qualifyCountEnabled;
+  els.qualifyCorrectCount.value = String(st.rules?.qualifyCorrectCount ?? 4);
+  els.dqWrongEnabled.checked = !!st.rules?.dqWrongEnabled;
+  els.dqWrongCount.value = String(st.rules?.dqWrongCount ?? 3);
+  // 表示設定
+  els.showScore.checked = st.ui?.showScore !== false;
+  els.showWrongCount.checked = st.ui?.showWrongCount !== false;
+  els.showMarks.checked = !!st.ui?.showMarks;
+  els.showMarkCorrect.checked = st.ui?.showMarkCorrect !== false;
+  els.showMarkWrong.checked = st.ui?.showMarkWrong !== false;
   const qrOn = !!st.ui?.joinQrVisible;
   els.toggleJoinQr.textContent = qrOn ? "QRコードを非表示" : "QRコードを表示";
   els.toggleJoinQr.dataset.on = qrOn ? "1" : "0";

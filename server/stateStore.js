@@ -18,6 +18,13 @@ function createInitialState() {
       dqEnabled: false,
       dqScore: -3,
 
+      // 勝ち抜け/失格（回数条件）
+      qualifyCountEnabled: false,
+      qualifyCorrectCount: 7,
+
+      dqWrongEnabled: false,
+      dqWrongCount: 3,
+
       // リーチ演出ON/OFF
       qualifyReachEnabled: false,
       dqReachEnabled: false
@@ -43,7 +50,23 @@ function createInitialState() {
       at: null
     },
 
-    // player: { id, name, score, restCount, pendingRestAdd }
+    ui: {
+      // 表示のON/OFF
+      showScore: true,
+      showWrongCount: true,
+
+      // Visualizerの○×表示
+      showMarks: false,
+      showMarkCorrect: true,
+      showMarkWrong: true,
+
+      // 既存の参加QR
+      joinQrVisible: false,
+      joinQrTargetUrl: null,
+      joinQrDataUrl: null
+    },
+
+    // player: { id, name, score, correctCount, wrongCount, restCount, pendingRestAdd }
     players: {}
   };
 }

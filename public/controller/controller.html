@@ -74,6 +74,13 @@
         <input id="qualifyScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
       </label>
     </div>
+    <div class="row">
+      <label>
+        <input id="qualifyCountEnabled" type="checkbox">
+        n回正解で勝ち抜け
+      </label>
+      <input id="qualifyCorrectCount" type="number" value="4" style="width:80px;">
+    </div>
 
     <div class="row">
       <label>
@@ -85,6 +92,13 @@
         <input id="dqScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
       </label>
     </div>
+    <div class="row">
+      <label>
+        <input id="dqWrongEnabled" type="checkbox">
+        n回誤答で失格
+      </label>
+      <input id="dqWrongCount" type="number" value="3" style="width:80px;">
+    </div>
 
     <div class="row">
       <label>
@@ -95,6 +109,16 @@
         <input id="dqReachEnabled" type="checkbox">
         失格リーチ演出
       </label>
+    </div>
+    <div class="row">
+      <label><input id="showScore" type="checkbox" checked> 得点表示</label>
+      <label><input id="showWrongCount" type="checkbox" checked> 誤答回数表示</label>
+    </div>
+
+    <div class="row">
+      <label><input id="showMarks" type="checkbox"> ○×表示</label>
+      <label><input id="showMarkCorrect" type="checkbox" checked> ○</label>
+      <label><input id="showMarkWrong" type="checkbox" checked> ×</label>
     </div>
 
     <div class="row">
