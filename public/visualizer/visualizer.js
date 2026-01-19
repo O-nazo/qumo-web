@@ -1,5 +1,5 @@
 import { createClient } from "/common/common.js";
-import { playSfxOnce, playSfxSequence, toggleThinking } from "/common/sfx.js";
+import { playSfxOnce, playSfxSequence, toggleThinking, warmupSfx } from "/common/sfx.js";
 
 const client = createClient({ screen: "visualizer" });
 const joinQrOverlay = document.querySelector("#joinQrOverlay");
@@ -12,6 +12,8 @@ const gapDigits = 4
 
 // ここが重要：onStateの外で保持する
 let lastSfxNonce = 0;
+
+warmupSfx();
 
 function getCurrentRespondent(st) {
   if (st.judge?.status !== "in_progress") return null;

@@ -31,6 +31,14 @@ let seqAudio = null;
 // key -> resolved src (string or null)
 const resolvedSrc = new Map();
 
+export async function warmupSfx() {
+  for (const key of Object.keys(SFX_FILES)) {
+    try {
+      await getPool(key);
+    } catch {}
+  }
+}
+
 function stopOneShotSequence() {
   seqToken++;
   if (seqAudio) {
