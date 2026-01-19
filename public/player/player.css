@@ -1,0 +1,297 @@
+/* ===== Base ===== */
+:root {
+  /* 既存 */
+  --side-w: 360px;
+  --gap: 32px;
+  --top-pad: 9vh;
+  --center-gap: 34px;
+
+  /* 追加：ボタン演出パラメータ（色に依存しない） */
+  --btn-bright-hi: 1.55;     /* 点滅の明るい瞬間 / 点灯 */
+  --btn-bright-base: 1.00;   /* 通常 */
+  --btn-bright-dim: 0.55;    /* 誤答・disable */
+  --btn-contrast-hi: 1.22;   /* 明るい時のコントラスト */
+  --btn-contrast-base: 1.00; /* 通常 */
+  --btn-sat-hi: 1.18;        /* 明るい時の彩度 */
+  --btn-sat-dim: 0.80;       /* 暗い時の彩度 */
+}
+
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+/* ===== PC / Tablet: 2 columns (center UI | card) ===== */
+body {
+  display: grid;
+  grid-template-columns: 1fr min(var(--side-w), 42vw);
+  gap: var(--gap);
+  align-items: start;
+  padding: 16px;
+}
+
+/* 中央UI：左カラムで縦に並べて中央揃え（確実版） */
+.center {
+  /* 追加：min-height に padding を含める */
+  box-sizing: border-box;
+
+  grid-column: 1;
+  min-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: var(--top-pad);
+  gap: var(--center-gap);
+}
+
+/* 子要素が左に引っ張られないように念のため */
+.center > .indicator,
+.center > .bigBtn {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* インジケータ */
+.indicator {
+  width: min(520px, 78vw);
+  height: 90px;
+  border-radius: 14px;
+  background: #111;
+  border: 4px solid #333;
+
+  display: grid;
+  place-items: center;
+
+  color: #eaeaea;
+  font-weight: 800;
+  font-size: 44px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+
+  user-select: none;
+  cursor: pointer;
+}
+
+.indicator:focus {
+  outline: 4px solid rgba(0,0,0,0.18);
+  outline-offset: 3px;
+}
+
+/* インジケータ入力 */
+.indicatorInput {
+  width: 88%;
+  height: 54px;
+  border: none;
+  border-radius: 10px;
+  padding: 0 14px;
+
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+
+  color: #111;
+}
+
+/* 赤丸ボタン */
+.bigBtn {
+  width: min(360px, 70vw);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  border: 10px solid #7a0000;
+  background: #d40000;
+
+  display: grid;
+  place-items: center;
+
+  cursor: pointer;
+  user-select: none;
+
+  box-shadow: 0 12px 28px rgba(0,0,0,0.25);
+}
+
+.bigBtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.22);
+}
+
+.bigBtn:disabled {
+  cursor: not-allowed;
+  transform: none;
+  opacity: 1;
+  /* filter は state クラス側で統一制御 */
+}
+
+.bigBtnLabel {
+  color: #fff;
+  font-weight: 900;
+  font-size: 36px;
+  letter-spacing: 0.06em;
+}
+
+/* 右カラム：カード */
+.side {
+  grid-column: 2;
+  align-self: start;
+  width: min(var(--side-w), 42vw);
+}
+
+/* 右側でスクロールしても追従したいなら sticky が便利 */
+@media (min-width: 701px) {
+  .side {
+    position: sticky;
+    top: 16px;
+  }
+}
+
+.card {
+  background: #f6f6f6;
+  padding: 12px;
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.label { opacity: 0.75; }
+.value { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+/* ボタンのエフェクト用 */
+.bigBtn {
+  position: relative;
+  z-index: 0;
+}
+
+@keyframes btnBlink {
+  0%, 100% {
+    filter:
+      brightness(var(--btn-bright-base))
+      contrast(var(--btn-contrast-base))
+      saturate(1);
+  }
+  50% {
+    filter:
+      brightness(var(--btn-bright-hi))
+      contrast(var(--btn-contrast-hi))
+      saturate(var(--btn-sat-hi));
+  }
+}
+
+.bigBtn.state-blink {
+  animation: btnBlink 0.45s ease-in-out infinite;
+}
+
+/* 点灯：押したが回答権はまだ（待ち） */
+.bigBtn.state-lit {
+  filter:
+    brightness(var(--btn-bright-hi))
+    contrast(var(--btn-contrast-hi))
+    saturate(var(--btn-sat-hi));
+}
+
+/* 不正解：暗くなる */
+.bigBtn.state-wrong {
+  animation: none;
+  filter:
+    brightness(var(--btn-bright-dim))
+    contrast(var(--btn-contrast-base))
+    saturate(var(--btn-sat-dim));
+}
+
+.bigBtn.state-disabledDim {
+  animation: none;
+  filter:
+    brightness(var(--btn-bright-dim))
+    contrast(var(--btn-contrast-base))
+    saturate(var(--btn-sat-dim));
+}
+
+/* 正解：回転する虹色の後光（リング） */
+@keyframes haloSpin {
+  to { transform: rotate(360deg); }
+}
+.bigBtn.state-correct::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #ff004c,
+    #ff7a00,
+    #ffe600,
+    #35ff00,
+    #00e5ff,
+    #3b4bff,
+    #b400ff,
+    #ff004c
+  );
+  animation: haloSpin 1.2s linear infinite;
+  z-index: -1;
+
+  /* リング化（中心を抜く） */
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 14px), #000 calc(100% - 12px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 14px), #000 calc(100% - 12px));
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.35));
+}
+
+
+
+/* ===== Mobile: card goes bottom (current behavior OK) ===== */
+@media (max-width: 700px) {
+  :root{
+    --top-pad: 10%; /* ここを好みで調整。0にするとピッタリ上詰め */
+  }
+
+  body {
+    display: block;
+    padding: 0;
+  }
+
+  .center {
+    min-height: 100vh;
+    padding: 0 0 170px 0;
+    padding-top: var(--top-pad);
+    gap: var(--center-gap);
+  }
+
+  .indicator {
+    width: min(520px, 92vw);
+  }
+
+  .side {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+  }
+}
+
+/* 勝ち抜け：正解の虹後光と同じリングを維持 */
+.bigBtn.state-qualified::before {
+  content: "";
+  position: absolute;
+  inset: -18px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #ff004c,#ff7a00,#ffe600,#35ff00,#00e5ff,#3b4bff,#b400ff,#ff004c
+  );
+  animation: haloSpin 1.2s linear infinite;
+  z-index: -1;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 14px), #000 calc(100% - 12px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 14px), #000 calc(100% - 12px));
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.35));
+}
+
+/* 失格：モノクロ */
+.bigBtn.state-dq {
+  filter: grayscale(1) brightness(0.75) contrast(1.05);
+}
+

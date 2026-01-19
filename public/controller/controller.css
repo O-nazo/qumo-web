@@ -1,0 +1,180 @@
+.row { display: flex; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+
+.card {
+  background: #f6f6f6;
+  padding: 12px;
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.kv { display: flex; justify-content: space-between; gap: 12px; }
+.k { opacity: 0.75; }
+.v { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+/* Visualizerと同じタイルUI */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  background: #f6f6f6;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border: 3px solid transparent; /* 色変更してもガタつかない */
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.nameRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.name {
+  font-size: 18px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.meta {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.kv2 {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.k2 { opacity: 0.75; }
+.v2 { font-variant-numeric: tabular-nums; }
+
+/* 押した人 */
+.tile.pressed { outline: 2px solid #333; }
+
+/* 先着 */
+.tile.first { outline: 3px solid #000; }
+
+/* 現在の解答者 */
+.tile.current { box-shadow: 0 0 0 3px rgba(0,0,0,0.25) inset; }
+
+/* 誤答済み */
+.tile.wrong { opacity: 0.7; }
+
+/* 正解 */
+.tile.correct {
+  border-color: #1b8f3a;
+  background: #d9f7e2;
+}
+
+/* 誤答 */
+.tile.wrong {
+  border-color: #c62828;
+  background: #fde0e0;
+}
+
+.tile.resting { opacity: 0.55; }
+
+.scoreEdit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scoreInput {
+  width: 72px;
+  padding: 4px 6px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.scoreBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+
+  /* ここが重要：文字を中央に固定 */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 !important;
+  line-height: 1 !important;
+  text-align: center !important;
+
+  font-weight: 900;
+  font-size: 18px;
+}
+
+button.danger {
+  background: #c62828;
+  color: #fff;
+  border: none;
+}
+button.danger:active {
+  filter: brightness(0.95);
+}
+
+/* 勝ち抜け：虹色の発光枠 */
+.tile.qualified {
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.0), 0 0 16px rgba(255,255,255,0.35);
+  position: relative;
+}
+.tile.qualified::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 16px;
+  background: conic-gradient(#ff004c,#ff7a00,#ffe600,#35ff00,#00e5ff,#3b4bff,#b400ff,#ff004c);
+  z-index: -1;
+  filter: blur(6px);
+  opacity: 0.85;
+}
+
+/* 失格：暗い赤 */
+.tile.disqualified {
+  background: #3a0b0b;
+  border-color: #7a1b1b;
+  color: #f2d6d6;
+}
+
+/* リーチ表示 */
+.reachTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.reach-win {
+  background: #1976d2;
+  color: #fff;
+}
+
+.reach-lose {
+  background: #c62828;
+  color: #fff;
+}
+

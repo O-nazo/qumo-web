@@ -1,0 +1,187 @@
+.top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.status {
+  display: flex;
+  gap: 16px;
+  background: #f6f6f6;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  background: #f6f6f6;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  border: 3px solid transparent; /* 色変更してもガタつかない */
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.nameRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.name {
+  font-size: 18px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.meta {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.k {
+  opacity: 0.75;
+}
+
+.v {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 押した人を強調 */
+.tile.pressed {
+  outline: 2px solid #333;
+}
+
+/* 先着をさらに強調 */
+.tile.first {
+  outline: 3px solid #000;
+}
+
+/* 正解 */
+.tile.correct {
+  border-color: #1b8f3a;
+  background: #d9f7e2;
+}
+
+/* 誤答 */
+.tile.wrong {
+  border-color: #c62828;
+  background: #fde0e0;
+}
+
+.tile.resting { opacity: 0.55; }
+
+.tile.resting { opacity: 0.55; }
+
+/* 勝ち抜け：虹色の発光枠 */
+.tile.qualified {
+  border-color: transparent;
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.0), 0 0 16px rgba(255,255,255,0.35);
+  position: relative;
+}
+.tile.qualified::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 16px;
+  background: conic-gradient(#ff004c,#ff7a00,#ffe600,#35ff00,#00e5ff,#3b4bff,#b400ff,#ff004c);
+  z-index: -1;
+  filter: blur(6px);
+  opacity: 0.85;
+}
+
+/* 失格：暗い赤 */
+.tile.disqualified {
+  background: #3a0b0b;
+  border-color: #7a1b1b;
+  color: #f2d6d6;
+}
+
+/* リーチ表示 */
+.reachTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.reach-win {
+  background: #1976d2;
+  color: #fff;
+}
+
+.reach-lose {
+  background: #c62828;
+  color: #fff;
+}
+
+/* QR */
+.qrOverlay {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+}
+
+.qrBox {
+  background: #fff;
+  border: 2px solid #111;
+  border-radius: 12px;
+  padding: 12px;
+  width: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  text-align: center;
+}
+
+.qrTitle {
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+#joinQrImg {
+  display: block;
+  width: 320px;
+  height: 320px;
+  margin: 0 auto;
+}
+
+.qrText {
+  margin-top: 8px;
+  font-size: 1.3em;
+  word-break: break-all;
+  opacity: 0.85;
+}
+
+.qrHint {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}

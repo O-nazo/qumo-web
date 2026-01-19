@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="stylesheet" href="/common/common.css" />
+  <link rel="stylesheet" href="/player/player.css" />
+</head>
+<body>
+  <!-- 中央UI -->
+  <main class="center">
+    <div id="indicator" class="indicator" tabindex="0"></div>
+
+    <button id="bigBtn" class="bigBtn" type="button">
+      <span id="bigBtnLabel" class="bigBtnLabel">CONNECT</span>
+    </button>
+  </main>
+
+  <!-- 右寄せの情報パネル（旧card） -->
+  <aside class="side">
+    <div class="card">
+      <div class="row">
+        <div class="label">名前</div>
+        <div id="name" class="value">-</div>
+      </div>
+      <div class="row">
+        <div class="label">得点</div>
+        <div id="score" class="value">0</div>
+      </div>
+      <div class="info-row">
+        <span class="info-label">現在の順位</span>
+        <span class="info-value" id="pointRank">-</span>
+      </div>
+      <div class="row">
+        <div class="label">休み</div>
+        <div id="rest" class="value">休み あと0問</div>
+      </div>
+      <div class="row">
+        <div class="label">着順</div>
+        <div id="rank" class="value">-</div>
+      </div>
+      <div class="row">
+        <div class="label">着差</div>
+        <div id="gap" class="value">-</div>
+      </div>
+    </div>
+  </aside>
+
+<script type="module" src="/player/player.js?v=20260108_01"></script>
+</body>
+</html>

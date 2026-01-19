@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/common/common.css" />
+  <link rel="stylesheet" href="/visualizer/visualizer.css" />
+</head>
+<body>
+  <header class="top">
+    <h1>クモノス QUMO-web</h1>
+  </header> 
+  <div id="joinQrOverlay" class="qrOverlay" hidden>
+    <div class="qrBox">
+      <div class="qrTitle">ここから参加！</div>
+      <img id="joinQrImg" alt="Player QR" />
+      <div id="joinQrText" class="qrText"></div>
+      <div id="joinQrHint" class="qrHint"></div>
+    </div>
+  </div>
+
+  <main>
+    <section>
+      <h2>Players</h2>
+      <div id="playersGrid" class="grid"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/visualizer/visualizer.js"></script>
+</body>
+</html>

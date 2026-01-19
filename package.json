@@ -1,0 +1,67 @@
+{
+  "name": "qumo-web",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+
+  "scripts": {
+    "start": "electron .",
+
+    "tunnel": "node tools/run-tunnel.js",
+
+    "dev": "concurrently --kill-others --kill-signal SIGINT -n app,tunnel -c auto \"npm:start\" \"npm:tunnel\"",
+
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac"
+  },
+
+  "build": {
+    "appId": "com.example.qumo.web",
+    "productName": "QUMO-WEB",
+    "asar": true,
+
+    "files": [
+      "electron/**",
+      "server/**",
+      "public/**",
+      "tools/**",
+      "package.json"
+    ],
+
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      },
+      {
+        "from": "bin/cloudflared.exe",
+        "to": "bin/cloudflared.exe"
+      }
+    ],
+
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+
+    "directories": {
+      "output": "dist_electron"
+    }
+  },
+
+  "dependencies": {
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0"
+  }
+}
