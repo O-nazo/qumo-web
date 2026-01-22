@@ -21,6 +21,14 @@ function getLocalIPv4s() {
   return Array.from(new Set(ips));
 }
 
+function listMods() {
+  const modsDir = path.join(process.cwd(), "mods");
+  if (!fs.existsSync(modsDir)) return [];
+  return fs.readdirSync(modsDir)
+    .filter(name => !name.startsWith("_"))
+    .filter(name => fs.existsSync(path.join(modsDir, name, "mod.json")));
+}
+
 function pickFirstExistingDir(candidates) {
   for (const dir of candidates) {
     if (dir && fs.existsSync(dir)) return dir;
@@ -71,9 +79,23 @@ async function start({ port }) {
     res.sendFile(path.join(publicDir, "controller", "controller.html"));
   });
 
+  const modsDir = path.join(process.cwd(), "mods");
+    if (fs.existsSync(modsDir)) {
+      app.use("/mods", express.static(modsDir));
+      console.log("[MOD] serve:", modsDir);
+    } else {
+      console.log("[MOD] mods dir not found:", modsDir);
+    }
+
   app.use(express.static(publicDir));
 
   const server = http.createServer(app);
+
+  const st0 = getState();
+  st0.mods = st0.mods || {};
+  st0.mods.available = listMods();
+  if (st0.mods.active == null) st0.mods.active = null;
+
   createWsServer(server);
 
   await new Promise((res) => server.listen(port, res));

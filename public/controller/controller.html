@@ -4,158 +4,196 @@
   <meta charset="utf-8" />
   <link rel="stylesheet" href="/common/common.css" />
   <link rel="stylesheet" href="/controller/controller.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
-  <h1>Controller</h1>
-    
-  <details>
-    <summary>ルール</summary>
-    <div class="row">
-      <label>
-        早押しルール
-        <select id="buzzMode" style="width:260px;">
-          <option value="endless">全着順判定（エンドレスチャンス）</option>
-          <option value="cultq">カルトQ方式</option>
-          <option value="single">シングルチャンス</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="row">
-      <label>
-        正解時の加点
-        <input id="correctPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-      </label>
-    </div>
-
-    <div class="row">
-      <label>
-        誤答時の減加
-        <input id="wrongPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-      </label>
-    </div>
-
-    <div class="row">
-      <label>
-        誤答罰（次問から休み）
-        <input id="restPenalty" type="number" min="0" max="20" step="1" style="width:90px;">
-        問
-      </label>
-    </div>
-  </details>
-
-  <details>
-    <summary>設定</summary>
-    <div class="row">
-      <label>
-        <input id="autoNextEnabled" type="checkbox">
-        自動で次問へ
-      </label>
-      <label>
-        待ち時間
-        <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
-        ms
-      </label>
-    </div>
-
-    <label>
-      シンキング秒数
-      <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
-      秒
-    </label>
-
-    <div class="row">
-      <label>
-        <input id="qualifyEnabled" type="checkbox">
-        勝ち抜け 有効
-      </label>
-      <label>
-        目標得点
-        <input id="qualifyScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-      </label>
-    </div>
-    <div class="row">
-      <label>
-        <input id="qualifyCountEnabled" type="checkbox">
-        n回正解で勝ち抜け
-      </label>
-      <input id="qualifyCorrectCount" type="number" value="4" style="width:80px;">
-    </div>
-
-    <div class="row">
-      <label>
-        <input id="dqEnabled" type="checkbox">
-        失格 有効
-      </label>
-      <label>
-        失格得点
-        <input id="dqScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-      </label>
-    </div>
-    <div class="row">
-      <label>
-        <input id="dqWrongEnabled" type="checkbox">
-        n回誤答で失格
-      </label>
-      <input id="dqWrongCount" type="number" value="3" style="width:80px;">
-    </div>
-
-    <div class="row">
-      <label>
-        <input id="qualifyReachEnabled" type="checkbox">
-        勝ち抜けリーチ演出
-      </label>
-      <label>
-        <input id="dqReachEnabled" type="checkbox">
-        失格リーチ演出
-      </label>
-    </div>
-    <div class="row">
-      <label><input id="showScore" type="checkbox" checked> 得点表示</label>
-      <label><input id="showWrongCount" type="checkbox" checked> 誤答回数表示</label>
-    </div>
-
-    <div class="row">
-      <label><input id="showMarks" type="checkbox"> ○×表示</label>
-      <label><input id="showMarkCorrect" type="checkbox" checked> ○</label>
-      <label><input id="showMarkWrong" type="checkbox" checked> ×</label>
-    </div>
-
-    <div class="row">
-      <div>参加用URL：</div>
-      <span id="joinUrls"></span>
-    </div>
-    <div class="row">
-      <button id="toggleJoinQr">QR表示</button>
-    </div>
-  </details>
-
-  <h2>進行</h2>
-  <div class="row">
-    <button id="present">出題</button>
-    <div class="row">
-      <button id="acReset" class="danger">AC</button>
-    </div>
+  <div id="topLeftTools">
+    <button id="openRules" class="iconBtn" title="ルール"><i class="fa-solid fa-clipboard-list"></i></button>
+    <button id="openSettings" class="iconBtn" title="設定"><i class="fa-solid fa-gear"></i></button>
+    <button id="openModsSettings" class="iconBtn" title="MOD"><i class="fa-solid fa-puzzle-piece"></i></button>
   </div>
 
-  <div class="card">
-    <div class="kv"><div class="k">問題数</div><div class="v">第 <span id="qno">1</span> 問</div></div>
-    <div class="kv"><div class="k">現在の解答者</div><div class="v" id="current">-</div></div>
-    <div class="kv"><div class="k">判定状態</div><div class="v" id="judgeStatus">-</div></div>
-    <div class="kv"><div class="k">結果</div><div class="v" id="result">-</div></div>
+  <div id="overlay" hidden>
+    <div class="overlayBg"></div>
+
+       <div class="overlayPanel" id="rulesPanel" hidden>
+        <h2>ルール</h2>
+        <div class="row">
+          <label>
+            早押しルール
+            <select id="buzzMode" style="width:260px;">
+              <option value="endless">全着順判定（エンドレスチャンス）</option>
+              <option value="cultq">カルトQ方式</option>
+              <option value="single">シングルチャンス</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            正解時の加点
+            <input id="correctPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            誤答時の減加
+            <input id="wrongPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            誤答罰（次問から休み）
+            <input id="restPenalty" type="number" min="0" max="20" step="1" style="width:90px;">
+            問
+          </label>
+        </div>
+      </div>
+
+      <div class="overlayPanel" id="settingsPanel" hidden>
+        <h2>設定</h2>
+        <div class="row">
+          <label>
+            <input id="autoNextEnabled" type="checkbox">
+            自動で次問へ
+          </label>
+          <label>
+            待ち時間
+            <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
+            ms
+          </label>
+        </div>
+
+        <label>
+          シンキング秒数
+          <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
+          秒
+        </label>
+
+        <div class="row">
+          <label>
+            <input id="qualifyEnabled" type="checkbox">
+            勝ち抜け 有効
+          </label>
+          <label>
+            目標得点
+            <input id="qualifyScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            <input id="qualifyCountEnabled" type="checkbox">
+            n回正解で勝ち抜け
+          </label>
+          <input id="qualifyCorrectCount" type="number" value="4" style="width:80px;">
+        </div>
+
+        <div class="row">
+          <label>
+            <input id="dqEnabled" type="checkbox">
+            失格 有効
+          </label>
+          <label>
+            失格得点
+            <input id="dqScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+          </label>
+        </div>
+        <div class="row">
+          <label>
+            <input id="dqWrongEnabled" type="checkbox">
+            n回誤答で失格
+          </label>
+          <input id="dqWrongCount" type="number" value="3" style="width:80px;">
+        </div>
+
+        <div class="row">
+          <label>
+            <input id="qualifyReachEnabled" type="checkbox">
+            勝ち抜けリーチ演出
+          </label>
+          <label>
+            <input id="dqReachEnabled" type="checkbox">
+            失格リーチ演出
+          </label>
+        </div>
+        <div class="row">
+          <label><input id="showScore" type="checkbox" checked> 得点表示</label>
+          <label><input id="showWrongCount" type="checkbox" checked> 誤答回数表示</label>
+        </div>
+
+        <div class="row">
+          <label><input id="showMarks" type="checkbox"> ○×表示</label>
+          <label><input id="showMarkCorrect" type="checkbox" checked> ○</label>
+          <label><input id="showMarkWrong" type="checkbox" checked> ×</label>
+        </div>
+
+        <div class="row">
+          <div>参加用URL：</div>
+          <span id="joinUrls"></span>
+        </div>
+        <div class="row">
+          <button id="toggleJoinQr">QR表示</button>
+        </div>
+
+      </div>
+
+      <div class="overlayPanel" id="modsSettingPanel" hidden>
+        <div class="row">
+          <div>MOD選択<div>
+          <select id="modSelect"></select>
+          <button id="modApply">Apply</button>
+          <button id="modReset">Reset</button>
+        </div>
+      </div>
+    </div>
+    </div>
+  </div>    
+
+  <div id="controllerLayout" class="layout">
+    <div id="controllerRoot" class="main">
+
+      <h2>進行</h2>
+      <div class="row">
+        <button id="present">出題</button>
+        <div class="row">
+          <button id="acReset" class="danger">AC</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="kv"><div class="k">問題数</div><div class="v">第 <span id="qno">1</span> 問</div></div>
+        <div class="kv"><div class="k">現在の解答者</div><div class="v" id="current">-</div></div>
+        <div class="kv"><div class="k">判定状態</div><div class="v" id="judgeStatus">-</div></div>
+        <div class="kv"><div class="k">結果</div><div class="v" id="result">-</div></div>
+      </div>
+
+      <div class="row">
+        <button id="thinking">シンキング</button>
+        <button id="correct">正解</button>
+        <button id="wrong">誤答</button>
+        <button id="skip">スルー</button>
+      </div>
+
+      <h2>Players</h2>
+      <div id="playersGrid" class="grid"></div>
+
+      <script type="module" src="/controller/controller.js"></script>
+
+    </div>
+
+    <aside id="modPanel" class="modPanel" hidden>
+      <div class="modPanelHeader">
+        <div class="modTitle" id="modTitle">MOD</div>
+        <button id="modCloseBtn" class="modCloseBtn">CLOSE</button>
+      </div>
+
+      <div class="modPanelBody" id="modPanelBody">
+        <!-- iframeをここに挿す -->
+      </div>
+    </aside>
+
   </div>
-
-<div class="row">
-  <button id="thinking">シンキング</button>
-  <button id="correct">正解</button>
-  <button id="wrong">誤答</button>
-  <button id="skip">スルー</button>
-</div>
-
-
-  <h2>Players</h2>
-  <div id="playersGrid" class="grid"></div>
-
-  <script type="module" src="/controller/controller.js"></script>
 </body>
 </html>

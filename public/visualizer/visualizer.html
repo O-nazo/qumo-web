@@ -6,9 +6,23 @@
   <link rel="stylesheet" href="/visualizer/visualizer.css" />
 </head>
 <body>
-  <header class="top">
-    <h1>クモノス QUMO-web</h1>
-  </header> 
+  <!-- 上：MOD main（画面の大部分） -->
+  <div id="mod-main-root" class="modMainRoot"></div>
+
+  <!-- 下：共通HUD -->
+  <div id="hud-root" class="hudRoot">
+    <header class="top">
+      <h1>クモノス QUMO-web</h1>
+    </header>
+
+    <main>
+      <section>
+        <h2>Players</h2>
+        <div id="playersGrid" class="grid"></div>
+      </section>
+    </main>
+  </div>
+
   <div id="joinQrOverlay" class="qrOverlay" hidden>
     <div class="qrBox">
       <div class="qrTitle">ここから参加！</div>
@@ -18,13 +32,7 @@
     </div>
   </div>
 
-  <main>
-    <section>
-      <h2>Players</h2>
-      <div id="playersGrid" class="grid"></div>
-    </section>
-  </main>
-
+  <script src="/common/modApi.js"></script>
   <script type="module" src="/visualizer/visualizer.js"></script>
 </body>
 </html>

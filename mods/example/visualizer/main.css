@@ -1,0 +1,45 @@
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+.stage{
+  position: fixed;
+  inset: 0;
+  background: #111;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+}
+
+.title{
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.screen{
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+}
+
+.msg{ opacity: 0.95; }
+
+.btn{
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+}
+
+.veil{
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+}
+
+.hidden{ display: none; }

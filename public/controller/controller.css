@@ -216,3 +216,106 @@ button.danger:active {
   width:72px;
 }
 
+.layout{
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main{
+  flex: 1 1 auto;
+  min-width: 560px; /* 既存UIが潰れない最低幅。必要に応じて調整 */
+  overflow: auto;
+}
+
+/* 左上アイコン */
+#topLeftTools {
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 8px;
+
+}
+
+.iconBtn {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+  text-align: center;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  background: #222;
+  color: #fff;
+}
+
+.iconBtn:hover {
+  background: #333;
+}
+
+/* オーバレイ全体 */
+#overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+}
+
+.overlayBg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+}
+
+/* パネル */
+.overlayPanel {
+  position: relative;
+  margin: 40px auto;
+  max-width: 520px;
+  background: #111;
+  color: #fff;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.overlayPanel h2 {
+  margin-top: 0;
+}
+
+
+/* 右パネル */
+.modPanel{
+  width: 420px;
+  flex: 0 0 420px;
+  border-left: 1px solid rgba(0,0,0,0.1);
+  background: rgba(0,0,0,0.03);
+  overflow: hidden;
+}
+
+.modPanelHeader{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.1);
+  background: rgba(255,255,255,0.8);
+}
+
+.modTitle{
+  font-weight: 700;
+}
+
+.modPanelBody{
+  height: calc(100vh - 48px);
+  overflow: hidden;
+}
+
+/* iframe */
+.modPanelBody iframe{
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}

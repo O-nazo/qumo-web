@@ -872,6 +872,31 @@ function createWsServer(httpServer) {
         return;
       }
 
+      if (type === C2S.SET_ACTIVE_MOD) {
+        if (ws.meta.screen !== "controller") return;
+
+        const modIdRaw = String(msg.modId || "").trim();
+
+        // ★ 解除（Reset）
+        if (modIdRaw === "") {
+          st.mods.active = null;
+          broadcastState();
+          broadcast({ type: S2C.RELOAD });
+          return;
+        }
+
+        // ★ 適用（Apply）
+        if (!st.mods?.available?.includes(modIdRaw)) {
+          send(ws, { type: S2C.ERROR, error: "Unknown MOD" });
+          return;
+        }
+
+        st.mods.active = modIdRaw;
+        broadcastState();
+        broadcast({ type: S2C.RELOAD });
+        return;
+      }
+
       send(ws, { type: S2C.ERROR, error: `Unknown type: ${type}` });
     });
 

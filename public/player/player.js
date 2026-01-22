@@ -34,6 +34,13 @@ client.onSelf(({ playerId }) => {
   joinedAt = Date.now(); // 追加：JOIN直後ガード用
 });
 
+client.onMessage?.((msg) => {
+  if (msg?.type === "RELOAD") {
+    console.log("[visualizer] reload by MOD change");
+    location.reload();
+  }
+});
+
 window.addEventListener("error", (e) => {
   indicatorEl.textContent = `ERR: ${e.message}`;
 });

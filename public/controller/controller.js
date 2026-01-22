@@ -2,6 +2,60 @@ import { createClient } from "/common/common.js";
 
 const client = createClient({ screen: "controller" });
 
+const overlay = document.getElementById("overlay");
+const rulesPanel = document.getElementById("rulesPanel");
+const settingsPanel = document.getElementById("settingsPanel");
+const modsSettingPanel = document.getElementById("modsSettingPanel");
+
+// --- MOD panel loader ---
+const modPanel = document.getElementById("modPanel");
+const modPanelBody = document.getElementById("modPanelBody");
+const modTitle = document.getElementById("modTitle");
+const modCloseBtn = document.getElementById("modCloseBtn");
+
+const modSelect = document.getElementById("modSelect");
+const modApply = document.getElementById("modApply");
+
+let currentModId = null;
+
+function setModPanelVisible(v){
+  modPanel.hidden = !v;
+}
+
+function loadModPanel(modId){
+  const id = String(modId || "").trim();
+  const panel = document.getElementById("modPanel");
+  const body = document.getElementById("modPanelBody");
+  const title = document.getElementById("modTitle");
+
+  if (!panel || !body) return;
+
+  if (!id) {
+    currentModId = null;
+    panel.hidden = true;
+    body.innerHTML = "";
+    return;
+  }
+
+  if (currentModId === id) return;
+  currentModId = id;
+
+  panel.hidden = false;
+  if (title) title.textContent = `MOD: ${id}`;
+
+  body.innerHTML = "";
+  const iframe = document.createElement("iframe");
+  iframe.src = `/mods/${encodeURIComponent(id)}/controller/panel.html`;
+  body.appendChild(iframe);
+}
+
+// 右パネルを閉じるだけ（MODのON/OFFは後で）
+document.getElementById("modCloseBtn")?.addEventListener("click", () => {
+  const panel = document.getElementById("modPanel");
+  if (panel) panel.hidden = true;
+});
+
+
 // 最新stateを保持（正解/誤答を「判定」か「SE再生」か切り替えるため）
 let lastState = null;
 
@@ -432,7 +486,7 @@ client.onState((st) => {
   els.toggleJoinQr.textContent = qrOn ? "QRコードを非表示" : "QRコードを表示";
   els.toggleJoinQr.dataset.on = qrOn ? "1" : "0";
   if (els.autoNextEnabled) els.autoNextEnabled.checked = !!st.rules?.autoNextEnabled;
-if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDelayMs ?? 800);
+  if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDelayMs ?? 800);
 
   els.qualifyEnabled.checked = !!st.rules?.qualifyEnabled;
   els.qualifyScore.value = String(st.rules?.qualifyScore ?? 4);
@@ -443,4 +497,82 @@ if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDe
   els.qualifyReachEnabled.checked = !!st.rules?.qualifyReachEnabled;
   els.dqReachEnabled.checked = !!st.rules?.dqReachEnabled;
 
+  const mods = st?.mods?.available || [];
+  const active = st?.mods?.active || "";
+  modSelect.value = st?.mods?.active ?? "";
+
+  if (modSelect && modSelect.options.length === 0) {
+    const noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "(none)";
+    modSelect.appendChild(noneOpt);
+
+    mods.forEach(id => {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = id;
+      modSelect.appendChild(opt);
+    });
+  }
+  if (modSelect) modSelect.value = active;
+
+  // MODが有効なら右パネルを出す（今は仮で st.mods.active を見る）
+  if (st?.mods?.active) {
+    loadModPanel(st.mods.active);
+  } else {
+    loadModPanel(null); // パネル非表示
+  }
+
 });
+
+window.addEventListener("message", (ev) => {
+  const data = ev.data;
+  if (!data || data.type !== "MOD_PANEL_CMD") return;
+
+  const cmd = data.cmd || {};
+  // 最初は安全のため allowlist
+  if (cmd.type === "PLAY_SFX") {
+    const key = String(cmd.key || "").trim();
+    if (!key) return;
+    client.send({ type: "PLAY_SFX", key }); // 既存プロトコルに乗せる
+  }
+
+  if (cmd.type === "RELOAD") {
+    location.reload();
+  }
+});
+
+modApply?.addEventListener("click", () => {
+  const modId = String(modSelect?.value || "").trim();
+  client.emit("SET_ACTIVE_MOD", { modId });
+});
+
+function openPanel(panel) {
+  overlay.hidden = false;
+  rulesPanel.hidden = true;
+  settingsPanel.hidden = true;
+  modsSettingPanel.hidden = true;
+  panel.hidden = false;
+}
+const modReset = document.getElementById("modReset");
+
+modReset?.addEventListener("click", () => {
+  console.log("[MOD] reset");
+  client.emit("SET_ACTIVE_MOD", { modId: "" }); // 空＝解除
+});
+
+function closeOverlay() {
+  overlay.hidden = true;
+}
+
+document.getElementById("openRules")
+  ?.addEventListener("click", () => openPanel(rulesPanel));
+
+document.getElementById("openSettings")
+  ?.addEventListener("click", () => openPanel(settingsPanel));
+
+document.getElementById("openModsSettings")
+  ?.addEventListener("click", () => openPanel(modsSettingPanel));
+
+overlay?.querySelector(".overlayBg")
+  ?.addEventListener("click", closeOverlay);

@@ -12,12 +12,15 @@ module.exports = {
 
     SET_THINKING_SECONDS: "SET_THINKING_SECONDS",
     SET_REST_PENALTY: "SET_REST_PENALTY",
-    PLAY_SFX: "PLAY_SFX"
+    PLAY_SFX: "PLAY_SFX",
+
+    SET_ACTIVE_MOD: "SET_ACTIVE_MOD"
   },
   S2C: {
     HELLO: "HELLO",
     SELF: "SELF",
     STATE: "STATE",
-    ERROR: "ERROR"
+    ERROR: "ERROR",
+    RELOAD: "RELOAD"
   }
 };

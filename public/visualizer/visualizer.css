@@ -9,7 +9,7 @@
 .status {
   display: flex;
   gap: 16px;
-  background: #f6f6f6;
+  background: #c5c5c5;
   padding: 10px 12px;
   border-radius: 10px;
 }
@@ -21,7 +21,7 @@
 }
 
 .tile {
-  background: #f6f6f6;
+  background: #c5c5c5;
   border-radius: 12px;
   padding: 12px;
   display: grid;
@@ -184,4 +184,70 @@
   margin-top: 6px;
   font-size: 12px;
   opacity: 0.7;
+}
+
+/* 画面全体を上下に分割 */
+/* 通常時：MOD main は存在しない */
+.modMainRoot {
+  display: none;
+}
+
+/* MOD VIEW のときだけ画面分割 */
+body.modView .modMainRoot {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 180px; /* HUD 高さ */
+  overflow: hidden;
+}
+
+/* HUD も MOD VIEW 時だけ高さ固定 */
+body.modView .hudRoot{
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 180px;
+}
+
+.hudRoot{
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(6px);
+  padding: 16px;
+}
+
+.modMainFrame{
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* MOD VIEW時：HUDはプレイヤーだけを詰めて表示する */
+body.modView .hudRoot header,
+body.modView .hudRoot h2 {
+  display: none;
+}
+
+/* Compact / PressedOnly の見た目 */
+.hudRoot.compact .grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.hudRoot.compact .tile {
+  padding: 8px;
+  border-radius: 10px;
+  gap: 6px;
+}
+
+.hudRoot.compact .meta {
+  display: none; /* 詳細メタは消す（簡易表示） */
+}
+
+.hudRoot.pressedOnly .tile:not(.pressed) {
+  display: none; /* 押した人だけ */
 }
