@@ -8,6 +8,13 @@ export function createClient({ screen, name, autoJoin = true }) {
   let self = { playerId: null };
   const selfListeners = new Set();
 
+  const msgListeners = new Set();
+  function onMessage(fn) {
+    msgListeners.add(fn);
+    return () => msgListeners.delete(fn);
+  }
+
+
   // --- 追加：OPEN前送信キュー ---
   const sendQueue = [];
   function sendOrQueue(obj) {
@@ -23,6 +30,10 @@ export function createClient({ screen, name, autoJoin = true }) {
       return;
     }
     // CLOSING/CLOSED は捨てる（必要なら再接続設計）
+  }
+
+  function send(obj) {
+    sendOrQueue(obj);
   }
 
   function flushQueue() {
@@ -120,8 +131,12 @@ export function createClient({ screen, name, autoJoin = true }) {
       if (msg.type === "STATE") {
         state = msg.state;
         for (const fn of stateListeners) fn(state);
-        return;
+        // return しない（下の汎用通知に流す）
       }
+
+      // ★追加：全メッセージを onMessage に流す（未知typeも拾う）
+      for (const fn of msgListeners) fn(msg);
+
     });
   });
 
@@ -132,5 +147,5 @@ ws.addEventListener("close", (e) => console.log("[WS] close", e.code, e.reason))
 ws.addEventListener("error", (e) => console.log("[WS] error", e));
 
 
-  return { ws, onState, onSelf, emit, join, nowServerMs };
+  return { ws, onState, onSelf, onMessage, send, emit, join, nowServerMs };
 }

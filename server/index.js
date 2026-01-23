@@ -5,6 +5,8 @@ const http = require("http");
 const { createWsServer } = require("./wsServer");
 const { getState } = require("./stateStore");
 const fs = require("fs");
+const { createModRuntime } = require("./modRuntime");
+const { setModRuntime } = require("./modRuntimeHub");
 
 function getLocalIPv4s() {
   const nets = os.networkInterfaces();
@@ -96,7 +98,18 @@ async function start({ port }) {
   st0.mods.available = listMods();
   if (st0.mods.active == null) st0.mods.active = null;
 
-  createWsServer(server);
+ 　const ws = createWsServer(server);
+
+  const runtime = createModRuntime({
+    app,
+    modsDir: path.join(process.cwd(), "mods"),
+    broadcast: ws.broadcast,
+    getState,
+    dispatch: null
+  });
+
+  runtime.loadAll();
+  setModRuntime(runtime);
 
   await new Promise((res) => server.listen(port, res));
 

@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const { C2S, S2C } = require("./protocol");
 const { getState, snapshot } = require("./stateStore");
+const { getModRuntime } = require("./modRuntimeHub");
 
 const fs = require("fs");
 const path = require("path");
@@ -444,6 +445,12 @@ function createWsServer(httpServer) {
 
         ws.meta.screen = screen;
 
+        const active = String(getState()?.mods?.active || "");
+        if (active) {
+          const rt = getModRuntime();
+          rt?.emit?.(active, "CLIENT_CONNECTED", { screen: ws.meta?.screen || null });
+        }
+
         if (screen === "player") {
           const name = String(sanitizeName(msg.name) || "Player").slice(0, 20);
           const playerId = genId(6);
@@ -837,21 +844,36 @@ function createWsServer(httpServer) {
         const recvAt = Date.now();
 
         // 押下時刻（クライアント同梱があれば採用。ただしズレが大きい時は無視）
-        // 互換：msg.tPress / msg.at どちらでもOK
         let at = recvAt;
         const tPress = Number(msg.tPress ?? msg.at);
         const MAX_SKEW_MS = 500;
         if (Number.isFinite(tPress) && Math.abs(tPress - recvAt) <= MAX_SKEW_MS) at = tPress;
 
-        // 記録（この問題内の「解答権獲得の履歴」として残す）
+        // ★重複ガードは「push前」
+        // 同一問で同じ人が2回以上押すのは無視（多重発火・連打対策）
+        if (st.buzzer?.buzzOrder?.some(b => b.playerId === playerId)) {
+          return;
+        }
+
+        // ★ここで1回だけ記録
         st.buzzer.buzzOrder.push({ playerId, at, recvAt });
 
         // 着順・着差のために常に時刻順に整列
         st.buzzer.buzzOrder.sort((a, b) => (a.at - b.at) || (a.recvAt - b.recvAt));
         recomputeFirstBuzz(st);
 
-        // 「いま回答者が居ない」なら、この時点で最初の回答者を立てる
-        if (st.judge.status !== "in_progress") {
+        // ここから「このBUZZで回答者が立つか？」を判定
+        const wrongSet = st.judge?.wrongSet || {};
+        const existsUnwrongedPlayer = Object.values(st.players || {}).some(
+          p => !wrongSet[p.id]
+        );
+
+        // 「回答者がいない」かつ「まだ誤答してない人がいる」なら、回答開始（buzzer）
+        const willStartResponding =
+          st.judge?.status !== "in_progress" &&
+          existsUnwrongedPlayer;
+
+        if (willStartResponding) {
           const nextIdx = pickNextRespondentIndex(st);
           if (nextIdx >= 0) {
             st.phase = "locked";
@@ -860,9 +882,13 @@ function createWsServer(httpServer) {
             st.judge.lastResult = null;
             emitSfx(st, "buzzer");
           }
+
+          broadcastState();
+          return;
         }
 
-        // --- 2着以下の押下音（push） ---
+        // それ以外は「2着以下の押下音（push）」
+        // ※この時点で「この押下の順位」が確定している
         const idx = st.buzzer.buzzOrder.findIndex(b => b.playerId === playerId);
         if (idx >= 1) {
           emitSfx(st, "push");
@@ -892,8 +918,43 @@ function createWsServer(httpServer) {
         }
 
         st.mods.active = modIdRaw;
+        const active = String(getState()?.mods?.active || "");
+        if (active) {
+          getModRuntime()?.emit?.(active, "MOD_ACTIVATED", {});
+        }
         broadcastState();
         broadcast({ type: S2C.RELOAD });
+        return;
+      }
+
+      // MOD用
+      // controller(panel) -> server -> mod(server/index.js)
+      if (type === "MOD_CMD") {
+        const modId = String(msg?.modId || "");
+        const cmd = msg?.cmd;
+        if (!modId || !cmd || typeof cmd.type !== "string") return;
+
+        const active = String(getState()?.mods?.active || "");
+        if (!active || modId !== active) return; // ←ガード
+
+        const rt = getModRuntime();
+        rt?.emit?.(modId, cmd.type, cmd);
+        return;
+      }
+
+      // visualizer(QUMO_MOD_API.dispatch) -> server -> mod(server/index.js)
+      if (type === "MOD_DISPATCH") {
+        const action = msg?.action;
+        if (!action || typeof action.type !== "string") return;
+
+        const st = getState();
+        const modId = String(st?.mods?.active || "");
+        if (!modId) return;
+
+        const rt = getModRuntime();
+        if (rt?.emit) {
+          rt.emit(modId, "DISPATCH", action);
+        }
         return;
       }
 
@@ -935,7 +996,7 @@ function createWsServer(httpServer) {
     });
   });
 
-  return { wss };
+  return { wss , broadcast };
 }
 
 module.exports = { createWsServer };

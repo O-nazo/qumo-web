@@ -1,22 +1,13 @@
 import { createClient } from "/common/common.js";
 import { playSfxOnce, playSfxSequence, toggleThinking, warmupSfx } from "/common/sfx.js";
 
-// --- MOD API bridge ---
-if (window.QUMO_MOD_API) {
-  window.QUMO_MOD_API.dispatch = (action) => {
-    // MOD → サーバーへ投げる
-    client.send({
-      type: "MOD_DISPATCH",
-      action
-    });
-  };
-}
-
 const client = createClient({ screen: "visualizer" });
 const joinQrOverlay = document.querySelector("#joinQrOverlay");
 const joinQrImg = document.querySelector("#joinQrImg");
 const joinQrText = document.querySelector("#joinQrText");
 const joinQrHint = document.querySelector("#joinQrHint");
+
+let lastState = null;
 
 // 着差の有効桁数
 const gapDigits = 4
@@ -28,6 +19,18 @@ warmupSfx();
 
 // --- MOD overlay loader (MVP) ---
 // --- MOD main loader (shell mode) ---
+
+// --- MOD API bridge ---
+if (window.QUMO_MOD_API) {
+  window.QUMO_MOD_API.dispatch = (action) => {
+    // MOD → サーバーへ投げる
+    client.send({
+      type: "MOD_DISPATCH",
+      action
+    });
+  };
+}
+
 let currentMainModId = null;
 let mainFrame = null;
 
@@ -50,6 +53,9 @@ function loadMain(modId) {
   iframe.src = `/mods/${encodeURIComponent(id)}/visualizer/main.html`;
   iframe.className = "modMainFrame";
   iframe.setAttribute("title", `MOD main: ${id}`);
+  iframe.addEventListener("load", () => {
+    iframe.contentWindow?.postMessage({ type: "MOD_INIT", modId: id }, "*");
+  });
 
   // main側で操作したいので pointer events は ON
   iframe.style.pointerEvents = "auto";
@@ -62,6 +68,27 @@ client.onMessage?.((msg) => {
   if (msg?.type === "RELOAD") {
     console.log("[visualizer] reload by MOD change");
     location.reload();
+    return;
+  }
+
+  // 汎用：MOD_EVENT を受け取ったら
+  if (msg?.type === "MOD_EVENT") {
+    const activeId = lastState?.mods?.active || null;
+    console.log("[MOD_EVENT]", { activeId, msgModId: msg.modId, hasMain: !!mainFrame });
+    // 1) MOD API（親側）へ流す
+    if (window.QUMO_MOD_API) {
+      window.QUMO_MOD_API.emitEvent(msg);
+    }
+
+    // 2) 表示中のMOD iframeへ中継（表示中MODだけ）
+    if (activeId && msg.modId === activeId) {
+      mainFrame?.contentWindow?.postMessage(
+        { type: "MOD_EVENT", modId: msg.modId, event: msg.event },
+        "*"
+      );
+      console.log("[MOD] forwarded MOD_EVENT to main", msg.event?.type);
+    }
+    return;
   }
 });
 
@@ -281,6 +308,8 @@ function renderPlayers(st, mode = "full") {
 
 
 client.onState((st) => {
+  lastState = st;
+
   // 先にUIを更新（音で描画が遅れないようにする）
   if(st.buzzer.firstBuzz != null){
     const first = st.buzzer.firstBuzz;

@@ -46,6 +46,9 @@ function loadModPanel(modId){
   body.innerHTML = "";
   const iframe = document.createElement("iframe");
   iframe.src = `/mods/${encodeURIComponent(id)}/controller/panel.html`;
+  iframe.addEventListener("load", () => {
+    iframe.contentWindow?.postMessage({ type: "MOD_INIT", modId: id }, "*");
+  });
   body.appendChild(iframe);
 }
 
@@ -58,6 +61,29 @@ document.getElementById("modCloseBtn")?.addEventListener("click", () => {
 
 // 最新stateを保持（正解/誤答を「判定」か「SE再生」か切り替えるため）
 let lastState = null;
+
+client.onMessage?.((msg) => {
+  if (msg?.type === "RELOAD") {
+    console.log("[controller] reload by MOD change");
+    location.reload();
+    return;
+  }
+
+  if (msg?.type !== "MOD_EVENT") return;
+
+  const activeId = String(lastState?.mods?.active || "");
+  if (!activeId) return;
+  if (msg.modId !== activeId) return;
+
+  const iframe = document.querySelector("#modPanelBody iframe");
+  iframe?.contentWindow?.postMessage(
+    { type: "MOD_EVENT", modId: msg.modId, event: msg.event },
+    "*"
+  );
+
+  console.log("[controller] forwarded MOD_EVENT", msg.event?.type);
+});
+
 
 let gapDigits = 5;
 
@@ -530,16 +556,27 @@ window.addEventListener("message", (ev) => {
   if (!data || data.type !== "MOD_PANEL_CMD") return;
 
   const cmd = data.cmd || {};
-  // 最初は安全のため allowlist
+  if (!cmd || typeof cmd.type !== "string") return;
+
+  // allowlist
   if (cmd.type === "PLAY_SFX") {
     const key = String(cmd.key || "").trim();
     if (!key) return;
-    client.send({ type: "PLAY_SFX", key }); // 既存プロトコルに乗せる
+    client.send({ type: "PLAY_SFX", key });
+    return;
   }
 
   if (cmd.type === "RELOAD") {
     location.reload();
+    return;
   }
+
+  // それ以外は MOD_CMD としてサーバへ
+  client.send({
+    type: "MOD_CMD",
+    modId: currentModId, // いま表示しているパネルのmodId
+    cmd
+  });
 });
 
 modApply?.addEventListener("click", () => {

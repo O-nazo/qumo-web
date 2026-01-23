@@ -1,0 +1,17 @@
+{
+  "id": "visual_quiz",
+  "name": "早押しビジュアル",
+  "version": "0.1.0",
+  "compatibleCore": "^0.1.0",
+  "entry": {
+    "visualizer": {
+      "main": "visualizer/main.html"
+    },
+    "controller": {
+      "panel": "controller/panel.html"
+    }
+  },
+  "assets": {
+    "publicDir": "assets"
+  }
+}

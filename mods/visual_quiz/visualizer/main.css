@@ -1,0 +1,87 @@
+body {
+  margin: 0;
+  background: #000;
+  color: #fff;
+  font-family: sans-serif;
+}
+
+#stage {
+  display: flex;
+  height: 100vh;
+}
+
+#image-area {
+  position: relative;
+  flex: 2;
+  overflow: hidden;
+  background: #111;
+}
+
+#q-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 蓋 */
+.lid {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  background: #000;
+  transition: transform 0.6s ease;
+  z-index: 10;
+}
+
+.lid.top {
+  top: 0;
+  transform: translateY(0);
+}
+
+.lid.bottom {
+  bottom: 0;
+  transform: translateY(0);
+}
+
+#image-area.open .lid.top {
+  transform: translateY(-100%);
+}
+#image-area.open .lid.bottom {
+  transform: translateY(100%);
+}
+
+/* 右側 */
+#answer-area {
+  flex: 1;
+  padding: 24px;
+  font-size: 28px;
+  background: #222;
+  box-sizing: border-box;
+}
+
+#q-text {
+  font-size: 22px;
+  opacity: 0.85;
+  margin-bottom: 16px;
+}
+
+#answer-text {
+  font-size: 36px;
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+
+/* デバッグ */
+#debug {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 20;
+  font-size: 14px;
+  background: rgba(0,0,0,0.55);
+  padding: 8px 10px;
+  border-radius: 8px;
+  white-space: pre;
+}
