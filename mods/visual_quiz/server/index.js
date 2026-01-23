@@ -29,6 +29,7 @@ export default function registerVisualQuiz(ctx) {
     phase: "LOADED", // LOADED | REVEALED | BUZZED | ANSWER | ENDED
     lidOpen: false,
     showAnswer: false,
+    thinking: false,        // ★追加：シンキングBGMのON/OFF
 
     lastBuzzPlayerId: null
   };
@@ -80,18 +81,27 @@ export default function registerVisualQuiz(ctx) {
    * MOD commands
    * ------------------- */
   ctx.on("VQ_START", () => {
-    if (st.phase !== "LOADED") return;
+    // 初回 or 誤答後にもう一度見せたい時を許可
+    if (st.phase !== "LOADED" && st.phase !== "BUZZED") return;
+    ctx.coreSfx("thinking", { durationSec: Number(st.rules?.thinkingSeconds ?? 999999) });
     st.phase = "REVEALED";
     st.lidOpen = true;
     st.showAnswer = false;
+    st.thinking = true;
     st.lastBuzzPlayerId = null;
     emitState();
   });
 
   ctx.on("VQ_OPEN", () => {
     st.lidOpen = true;
+
+    if (st.phase === "ENDED") {
+      st.showAnswer = true;
+    }
+
     emitState();
   });
+
 
   ctx.on("VQ_CLOSE", () => {
     st.lidOpen = false;
@@ -110,13 +120,17 @@ export default function registerVisualQuiz(ctx) {
   });
 
   ctx.on("VQ_NEXT", () => {
+    if (st.phase !== "ENDED" && st.phase !== "ANSWER") return;
+
     st.qIndex = Math.min(st.qIndex + 1, st.questions.length - 1);
     st.phase = "LOADED";
     st.lidOpen = false;
     st.showAnswer = false;
+    st.thinking = false;
     st.lastBuzzPlayerId = null;
     emitState();
   });
+
 
   ctx.on("VQ_SELECT_Q", (cmd) => {
     if (typeof cmd.qIndex !== "number") return;
@@ -133,12 +147,47 @@ export default function registerVisualQuiz(ctx) {
    * BUZZ
    * ------------------- */
   ctx.on("BUZZ", (ev) => {
+    console.log("buzz");
     if (st.phase !== "REVEALED") return;
     if (ev.rank !== 1) return;
 
+    ctx.coreSfx("thinking", { durationSec: 0 });
     st.phase = "BUZZED";
     st.lidOpen = false;
+    st.thinking = false;      // ★追加
     st.lastBuzzPlayerId = ev.playerId;
     emitState();
   });
+
+  // 正解：蓋を開けて答え表示
+  ctx.on("JUDGE_CORRECT", () => {
+    // 画像は見せて良い。答えも表示
+    st.phase = "ANSWER";
+    st.lidOpen = true;
+    st.showAnswer = true;
+    st.thinking = false;
+    emitState();
+  });
+
+  // 誤答：蓋は閉じたまま。次にSTARTを押したら再オープンできる状態へ
+  ctx.on("JUDGE_WRONG", () => {
+    // 画像は隠す（そのまま）
+    st.phase = "BUZZED";      // ★「再開待ち」扱い
+    st.lidOpen = false;
+    st.showAnswer = false;
+    st.thinking = false;
+    st.lastBuzzPlayerId = null;
+    emitState();
+  });
+
+  // スルー：問題終了状態へ
+  ctx.on("JUDGE_SKIP", () => {
+    st.phase = "ENDED";
+    st.lidOpen = false;
+    st.showAnswer = false;
+    st.thinking = false;
+    emitState();
+  });
+
+
 }

@@ -47,8 +47,13 @@ function render() {
     list.appendChild(div);
   });
 
-  // buttons enable/disable（最低限）
-  qs("btnStart").disabled = (last.phase !== "LOADED");
+  const phase = last.phase;
+
+  qs("btnStart").disabled  = !(phase === "LOADED" || phase === "BUZZED");
+  qs("btnNext").disabled   = !(phase === "ENDED"  || phase === "ANSWER");
+  qs("btnOpen").disabled   = !(phase === "ENDED"); // 仕様通り「終了状態で答え表示付き」
+  qs("btnClose").disabled  = (phase === "LOADED"); // 好みで
+
 }
 
 function escapeHtml(s) {

@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
+const { getCoreApi } = require("./modRuntimeHub"); // CJSの場合
 
 function createModRuntime({ app, modsDir, broadcast, getState, dispatch }) {
   const mods = new Map();
@@ -17,7 +18,12 @@ function createModRuntime({ app, modsDir, broadcast, getState, dispatch }) {
       },
       broadcast(msg) { broadcast(msg); },
       dispatch(action) { dispatch?.(action); },
-      getState() { return getState(); }
+      getState() { return getState(); },
+      coreSfx(key, extra = {}) {
+        const api = getCoreApi();
+        if (!api?.emitSfx) return;
+        api.emitSfx(key, extra);
+      },
     };
 
     mods.set(modId, { handlers, ctx });

@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const { C2S, S2C } = require("./protocol");
 const { getState, snapshot } = require("./stateStore");
-const { getModRuntime } = require("./modRuntimeHub");
+const { getModRuntime, setCoreApi } = require("./modRuntimeHub");
 
 const fs = require("fs");
 const path = require("path");
@@ -65,6 +65,13 @@ function emitSfx(st, key, extra = {}) {
   st.sfx.durationSec = extra.durationSec ?? null; // thinking用
   st.sfx.chainKey = extra.chainKey ?? null;       // 連続再生用
 }
+
+function emitMod(name, payload) {
+  const active = String(getState()?.mods?.active || "");
+  if (!active) return;
+  getModRuntime()?.emit?.(active, name, payload);
+}
+
 
 function clampInt(n, min, max, fallback = 0) {
   const x = Number(n);
@@ -384,6 +391,14 @@ function createWsServer(httpServer) {
     broadcast({ type: S2C.STATE, state: st });
   }
 
+  setCoreApi({
+    emitSfx: (key, extra = {}) => {
+      const st = getState();       // あなたのwsServer.js冒頭にあるやつ
+      emitSfx(st, key, extra);     // wsServer.js内の既存関数
+      broadcastState();            // wsServer.js内の既存関数
+    }
+  });
+
   function clampRulePoints(n) {
     const x = Number(n);
     if (!Number.isFinite(x)) return 0;
@@ -564,7 +579,7 @@ function createWsServer(httpServer) {
           p.correctCount = Number(p.correctCount ?? 0) + 1;
         }
         recomputeScores(st);
-
+        emitMod("JUDGE_CORRECT", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
         emitSfx(st, "correct");
         recomputePlayerStatuses(st);
         setResult(st, { type: "correct", playerId: cur.playerId });
@@ -595,6 +610,8 @@ function createWsServer(httpServer) {
         st.judge.wrongSet[cur.playerId] = true;
 
         const buzzMode = getBuzzMode(st);
+
+        emitMod("JUDGE_WRONG", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
 
         if (buzzMode === "single") {
           emitSfx(st, "wrong");
@@ -861,6 +878,23 @@ function createWsServer(httpServer) {
         // 着順・着差のために常に時刻順に整列
         st.buzzer.buzzOrder.sort((a, b) => (a.at - b.at) || (a.recvAt - b.recvAt));
         recomputeFirstBuzz(st);
+
+        // いま有効なMODがあれば、MODへBUZZイベントを通知
+        const active = String(getState()?.mods?.active || "");
+        if (active) {
+          const rt = getModRuntime();
+          const idx = st.buzzer.buzzOrder.findIndex(b => b.playerId === playerId);
+          const rank = idx >= 0 ? idx + 1 : null;
+
+          rt?.emit?.(active, "BUZZ", {
+            playerId,
+            rank,
+            at,
+            recvAt,
+            phase: st.phase,
+            judgeStatus: st.judge?.status ?? null
+          });
+        }
 
         // ここから「このBUZZで回答者が立つか？」を判定
         const wrongSet = st.judge?.wrongSet || {};
