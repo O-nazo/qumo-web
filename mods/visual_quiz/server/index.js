@@ -25,10 +25,12 @@ export default function registerVisualQuiz(ctx) {
   const st = {
     questions: [],
     qIndex: 0,
+    selectedQIndex: 0,
 
     phase: "LOADED", // LOADED | REVEALED | BUZZED | ANSWER | ENDED
     lidOpen: false,
     showAnswer: false,
+    showQuestionText: true,
     thinking: false,        // ★追加：シンキングBGMのON/OFF
 
     lastBuzzPlayerId: null
@@ -46,22 +48,136 @@ export default function registerVisualQuiz(ctx) {
         type: "STATE",
         state: {
           ...st,
-          current: st.questions[st.qIndex] || null
+          current: typeof st.qIndex === "number" ? (st.questions[st.qIndex] || null) : null
         }
       }
     });
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let field = "";
+    let row = [];
+    let inQuotes = false;
+
+    function pushField() {
+      row.push(field);
+      field = "";
+    }
+
+    function pushRow() {
+      if (row.length === 1 && row[0] === "" && rows.length === 0) {
+        row = [];
+        return;
+      }
+      rows.push(row);
+      row = [];
+    }
+
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+
+      if (inQuotes) {
+        if (ch === "\"") {
+          if (text[i + 1] === "\"") {
+            field += "\"";
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          field += ch;
+        }
+        continue;
+      }
+
+      if (ch === "\"") {
+        inQuotes = true;
+        continue;
+      }
+
+      if (ch === ",") {
+        pushField();
+        continue;
+      }
+
+      if (ch === "\n") {
+        pushField();
+        pushRow();
+        continue;
+      }
+
+      if (ch === "\r") {
+        continue;
+      }
+
+      field += ch;
+    }
+
+    pushField();
+    if (row.length > 1 || row[0] !== "") {
+      pushRow();
+    }
+
+    return rows;
+  }
+
+  function normalizeNo(value) {
+    const n = Number(String(value ?? "").trim());
+    if (!Number.isFinite(n)) return null;
+    return String(Math.trunc(n));
+  }
+
+  function loadQuestionImageMap() {
+    const imagesDir = path.join(__dirname, "../assets/q/images");
+    const imageMap = new Map();
+    const entries = fs.readdirSync(imagesDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+
+      const parsed = path.parse(entry.name);
+      const normalized = normalizeNo(parsed.name);
+      if (normalized == null) continue;
+
+      if (!imageMap.has(normalized)) {
+        imageMap.set(normalized, entry.name);
+      }
+    }
+
+    return imageMap;
   }
 
   function loadQuestions() {
     try {
       const p = path.join(
         __dirname,
-        "../assets/q/questions.json"
+        "../assets/q/questions.csv"
       );
-      const json = JSON.parse(fs.readFileSync(p, "utf-8"));
-      st.questions = json;
+      const csvText = fs.readFileSync(p, "utf-8");
+      const rows = parseCsv(csvText);
+      const [header = [], ...dataRows] = rows;
+      const columns = header.map((col) => String(col || "").trim());
+      const imageMap = loadQuestionImageMap();
+
+      st.questions = dataRows
+        .filter((cols) => cols.some((value) => String(value || "").trim() !== ""))
+        .map((cols) => {
+          const raw = Object.fromEntries(
+            columns.map((key, idx) => [key, String(cols[idx] ?? "").trim()])
+          );
+          const normalizedNo = normalizeNo(raw.no);
+
+          return {
+            no: Number(raw.no || 0),
+            question: raw.question || "",
+            answer: raw.answer || "",
+            file: normalizedNo == null ? "" : (imageMap.get(normalizedNo) || "")
+          };
+        });
       st.qIndex = 0;
-      console.log("[visual_quiz] questions loaded:", json.length);
+      st.selectedQIndex = st.questions.length > 0 ? 0 : null;
+      console.log("[visual_quiz] questions loaded:", st.questions.length);
     } catch (e) {
       console.error("[visual_quiz] failed to load questions", e);
       st.questions = [];
@@ -77,16 +193,37 @@ export default function registerVisualQuiz(ctx) {
   ctx.on("CLIENT_CONNECTED", emitState);
   ctx.on("MOD_ACTIVATED", emitState);
 
+  function resetForPresent() {
+    st.qIndex = null;
+    st.phase = "LOADED";
+    st.lidOpen = false;
+    st.showAnswer = false;
+    st.showQuestionText = false;
+    st.thinking = false;
+    st.lastBuzzPlayerId = null;
+    st.selectedQIndex = null;
+  }
+
   /** --------------------
    * MOD commands
    * ------------------- */
+  ctx.on("VQ_PRESENT", () => {
+    resetForPresent();
+    emitState();
+  });
+
   ctx.on("VQ_START", () => {
     // 初回 or 誤答後にもう一度見せたい時を許可
     if (st.phase !== "LOADED" && st.phase !== "BUZZED") return;
-    ctx.coreSfx("thinking", { durationSec: Number(st.rules?.thinkingSeconds ?? 999999) });
+    if (typeof st.qIndex !== "number" || !st.questions[st.qIndex]) return;
+
+    ctx.coreSfx("thinking", {
+      durationSec: Number(ctx.getState()?.rules?.thinkingSeconds ?? 999999)
+    });
     st.phase = "REVEALED";
     st.lidOpen = true;
     st.showAnswer = false;
+    st.showQuestionText = true;
     st.thinking = true;
     st.lastBuzzPlayerId = null;
     emitState();
@@ -94,6 +231,7 @@ export default function registerVisualQuiz(ctx) {
 
   ctx.on("VQ_OPEN", () => {
     st.lidOpen = true;
+    st.showQuestionText = true;
 
     if (st.phase === "ENDED") {
       st.showAnswer = true;
@@ -123,9 +261,11 @@ export default function registerVisualQuiz(ctx) {
     if (st.phase !== "ENDED" && st.phase !== "ANSWER") return;
 
     st.qIndex = Math.min(st.qIndex + 1, st.questions.length - 1);
+    st.selectedQIndex = st.qIndex;
     st.phase = "LOADED";
     st.lidOpen = false;
     st.showAnswer = false;
+    st.showQuestionText = true;
     st.thinking = false;
     st.lastBuzzPlayerId = null;
     emitState();
@@ -136,9 +276,12 @@ export default function registerVisualQuiz(ctx) {
     if (typeof cmd.qIndex !== "number") return;
     if (cmd.qIndex < 0 || cmd.qIndex >= st.questions.length) return;
     st.qIndex = cmd.qIndex;
+    st.selectedQIndex = cmd.qIndex;
     st.phase = "LOADED";
     st.lidOpen = false;
     st.showAnswer = false;
+    st.showQuestionText = true;
+    st.thinking = false;
     st.lastBuzzPlayerId = null;
     emitState();
   });
@@ -149,12 +292,12 @@ export default function registerVisualQuiz(ctx) {
   ctx.on("BUZZ", (ev) => {
     console.log("buzz");
     if (st.phase !== "REVEALED") return;
-    if (ev.rank !== 1) return;
+    if (st.lastBuzzPlayerId) return;
 
-    ctx.coreSfx("thinking", { durationSec: 0 });
     st.phase = "BUZZED";
     st.lidOpen = false;
-    st.thinking = false;      // ★追加
+    st.showQuestionText = true;
+    st.thinking = false;
     st.lastBuzzPlayerId = ev.playerId;
     emitState();
   });
@@ -165,6 +308,7 @@ export default function registerVisualQuiz(ctx) {
     st.phase = "ANSWER";
     st.lidOpen = true;
     st.showAnswer = true;
+    st.showQuestionText = true;
     st.thinking = false;
     emitState();
   });
@@ -175,6 +319,7 @@ export default function registerVisualQuiz(ctx) {
     st.phase = "BUZZED";      // ★「再開待ち」扱い
     st.lidOpen = false;
     st.showAnswer = false;
+    st.showQuestionText = true;
     st.thinking = false;
     st.lastBuzzPlayerId = null;
     emitState();
@@ -185,6 +330,7 @@ export default function registerVisualQuiz(ctx) {
     st.phase = "ENDED";
     st.lidOpen = false;
     st.showAnswer = false;
+    st.showQuestionText = true;
     st.thinking = false;
     emitState();
   });

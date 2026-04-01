@@ -8,13 +8,26 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="row">
-      <button id="btnStart" class="primary">START</button>
-      <button id="btnNext">次問</button>
-      <button id="btnOpen">開</button>
-      <button id="btnClose">閉</button>
-      <button id="btnAnswer">解答表示</button>
-      <button id="btnSkip" class="danger">スルー</button>
+    <div class="toolbarRow">
+      <div class="toolbarGroup">
+        <button id="btnPresentCore">出題</button>
+        <button id="btnSkip">スルー</button>
+      </div>
+      <div class="toolbarGroup toolbarGroupRight">
+        <button id="btnAnswer">解答表示</button>
+      </div>
+    </div>
+
+    <div class="toolbarRow toolbarRowLarge">
+      <div class="toolbarGroup">
+        <button id="btnStart">START</button>
+        <button id="btnCorrectCore" class="danger">正解</button>
+        <button id="btnWrongCore" class="primary">誤答</button>
+      </div>
+      <div class="toolbarGroup toolbarGroupRight">
+        <button id="btnOpen">開</button>
+        <button id="btnClose">閉</button>
+      </div>
     </div>
 
     <div class="grid">
@@ -27,7 +40,6 @@
           <div class="meta">
             <div id="previewQ" class="q"></div>
             <div id="previewA" class="a"></div>
-            <div id="previewInfo" class="info"></div>
           </div>
         </div>
       </section>

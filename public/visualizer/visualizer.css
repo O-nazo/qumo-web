@@ -1,9 +1,33 @@
-.top {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+body {
+  --judge-correct: #2f80ed;
+  --judge-correct-soft: #deeffa;
+  --judge-wrong: #d64545;
+  --judge-wrong-soft: #fde0e0;
+  --judge-wrong-border: #c62828;
+  position: relative;
+  min-height: 100vh;
+  background:
+    linear-gradient(rgba(255,255,255,0.9), rgba(255,255,255,0.9)),
+    #f5f5f5;
+}
+
+body.swapJudgeColors {
+  --judge-correct: #d64545;
+  --judge-correct-soft: #fde0e0;
+  --judge-wrong: #2f80ed;
+  --judge-wrong-soft: #deeffa;
+  --judge-wrong-border: #7eb6d9;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    url("/logo/Logo_ver.png") center center / min(50vw, 520px) auto no-repeat;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .status {
@@ -20,34 +44,306 @@
   gap: 12px;
 }
 
+.grid.verticalMode {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 18px;
+}
+
 .tile {
-  background: #c5c5c5;
+  background: #f6f6f6;
   border-radius: 12px;
   padding: 12px;
   display: grid;
   gap: 8px;
-  border: 3px solid transparent; /* 色変更してもガタつかない */
+  border: 8px solid transparent; /* 色変更してもガタつかない */
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
   transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.tile > * {
+  position: relative;
+  z-index: 1;
+}
+
+.verticalTile {
+  width: 108px;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 20px;
+  text-align: center;
+}
+
+.verticalRank {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.gridRank {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: rgba(0,0,0,0.65);
+  text-align: left;
+  line-height: 1;
+}
+
+.rankBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.verticalRank.rankBadge {
+  justify-content: center;
+}
+
+.rankBadge.is-first {
+  color: #d4a100;
+}
+
+.gridRankRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gridGap {
+  min-width: 0;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #10a651;
+  text-align: right;
+  line-height: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.verticalName {
+  flex: 0 0 min(48vh, 420px);
+  height: min(48vh, 420px);
+  max-height: min(48vh, 420px);
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.verticalName-sm {
+  font-size: 36px;
+}
+
+.verticalName-xs {
+  font-size: 30px;
+}
+
+.verticalName-xxs {
+  font-size: 24px;
+}
+
+.verticalName-xxxs {
+  font-size: 20px;
+}
+
+.verticalBuzzRow {
+  width: 100%;
+  height: 2.2em;
+  min-height: 2.2em;
+  max-height: 2.2em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: #10a651;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
+  gap: 0;
+  overflow: hidden;
+}
+
+.verticalBuzzRow.is-empty {
+  visibility: hidden;
+}
+
+.verticalBuzzRank,
+.verticalBuzzGap {
+  display: block;
+  height: 1.1em;
+  line-height: 1.1em;
+}
+
+.verticalStats {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.verticalStat {
+  width: 100%;
+  font-size: 34px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0;
+}
+
+.verticalStatGlyph {
+  display: inline-block;
+  line-height: 1;
+  width: 0.56em;
+  text-align: center;
+  flex: 0 0 0.56em;
+}
+
+.verticalStatValue {
+  display: inline-block;
+  line-height: 1;
+  min-width: 1.6em;
+  text-align: right;
+  flex: 0 0 1.6em;
+}
+
+.verticalStatGlyph-circle {
+  font-size: 0.84em;
+}
+
+.verticalStatGlyph-cross {
+  font-size: 0.98em;
+  transform: translateX(0.04em);
+}
+
+.verticalStatGlyph-rest {
+  font-size: 0.92em;
+}
+
+.verticalStat-score {
+  color: #111;
+  font-size: 40px;
+}
+
+.verticalStat-correct {
+  color: var(--judge-correct);
+}
+
+.verticalStat-wrong {
+  color: var(--judge-wrong);
+}
+
+.verticalStat-rest {
+  color: #10a651;
 }
 
 .nameRow {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 10px;
 }
 
 .name {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .score {
+  font-size: 30px;
+  font-weight: 900;
+  font-family: "Bahnschrift", "Arial Narrow", "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+.countSummary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 20px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.countSummaryRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.buzzOrderInline {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #10a651;
+  line-height: 1.1;
+}
+
+.restBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #10a651;
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.restBadgeIcon {
+  font-size: 16px;
+}
+
+.restBadgeValue {
+  min-width: 1ch;
+}
+
+.countSummaryItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.countSummaryCorrect {
+  color: var(--judge-correct);
+}
+
+.countSummaryWrong {
+  color: var(--judge-wrong);
 }
 
 .meta {
@@ -70,31 +366,123 @@
   font-variant-numeric: tabular-nums;
 }
 
+.marksLine {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 1.2em;
+  width: 100%;
+}
+
+.marksCorrect {
+  color: var(--judge-correct);
+}
+
+.marksWrong {
+  color: var(--judge-wrong);
+}
+
+.marksMeta {
+  min-height: 1.4em;
+}
+
+.marksLine .is-empty {
+  visibility: hidden;
+}
+
 /* 押した人を強調 */
 .tile.pressed {
-  outline: 2px solid #333;
+  border-color: #10a651;
+  box-shadow: inset 0 0 0 1px #10a651;
 }
 
 /* 先着をさらに強調 */
 .tile.first {
-  outline: 3px solid #000;
+  border-color: #0a8a42;
+  box-shadow: inset 0 0 0 2px #0a8a42;
+}
+
+@keyframes currentPulse {
+  0%, 100% {
+    border-color: rgba(18, 182, 91, 0.18);
+  }
+  50% {
+    border-color: rgba(18, 182, 91, 1);
+  }
+}
+
+.tile.current {
+  animation: currentPulse 0.45s ease-in-out infinite;
+  border-color: #12b65b;
+  color: #123221;
 }
 
 /* 正解 */
 .tile.correct {
-  border-color: #1b8f3a;
-  background: #d9f7e2;
+  background: var(--judge-correct-soft);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.tile.correct::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 20px;
+  padding: 8px;
+  background: linear-gradient(
+    90deg,
+    #ff004c,
+    #ff7a00,
+    #ffe600,
+    #35ff00,
+    #00e5ff,
+    #3b4bff,
+    #b400ff,
+    #ff004c
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  z-index: 0;
+  pointer-events: none;
+  animation: tileRainbowHue 2.2s linear infinite;
+}
+
+@keyframes tileRainbowHue {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
 }
 
 /* 誤答 */
 .tile.wrong {
-  border-color: #c62828;
-  background: #fde0e0;
+  border-color: var(--judge-wrong-border);
+  background: var(--judge-wrong-soft);
+  box-shadow: none;
 }
 
-.tile.resting { opacity: 0.55; }
+.tile.resting {
+  background: #f6f6f6;
+  border-color: #d2d2d2;
+  color: inherit;
+  box-shadow: none;
+}
 
-.tile.resting { opacity: 0.55; }
+.tile.resting .name,
+.tile.resting .score,
+.tile.resting .gridRank,
+.tile.resting .gridGap,
+.tile.resting .buzzOrderInline,
+.tile.resting .verticalBuzzRow,
+.tile.resting .restBadge,
+.tile.resting .verticalRank,
+.tile.resting .verticalName,
+.tile.resting .verticalStat-score {
+  color: #b8b8b8;
+}
 
 /* 勝ち抜け：虹色の発光枠 */
 .tile.qualified {
@@ -120,6 +508,12 @@
   color: #f2d6d6;
 }
 
+.tile.disqualified .gridRank,
+.tile.disqualified .verticalRank,
+.tile.disqualified .rankBadge {
+  color: inherit;
+}
+
 /* リーチ表示 */
 .reachTag {
   display: inline-flex;
@@ -133,12 +527,12 @@
 }
 
 .reach-win {
-  background: #1976d2;
+  background: var(--judge-correct);
   color: #fff;
 }
 
 .reach-lose {
-  background: #c62828;
+  background: var(--judge-wrong);
   color: #fff;
 }
 
@@ -155,34 +549,38 @@
   background: #fff;
   border: 2px solid #111;
   border-radius: 12px;
-  padding: 12px;
-  width: auto;
+  padding: 2.5vh 2.5vw;
+  width: min(88vw, 88vh);
+  max-width: 92vw;
   box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   text-align: center;
 }
 
 .qrTitle {
   font-weight: 800;
-  margin-bottom: 10px;
+  margin-bottom: 2vh;
+  font-size: min(3.6vw, 3.6vh);
 }
 
 #joinQrImg {
   display: block;
-  width: 320px;
-  height: 320px;
+  width: min(64vw, 64vh);
+  height: min(64vw, 64vh);
+  max-width: 100%;
+  max-height: 100%;
   margin: 0 auto;
 }
 
 .qrText {
-  margin-top: 8px;
-  font-size: 1.3em;
+  margin-top: 2vh;
+  font-size: min(4vw, 4vh);
   word-break: break-all;
   opacity: 0.85;
 }
 
 .qrHint {
-  margin-top: 6px;
-  font-size: 12px;
+  margin-top: 1.2vh;
+  font-size: min(2vw, 2vh);
   opacity: 0.7;
 }
 
@@ -216,6 +614,15 @@ body.modView .hudRoot{
   background: rgba(255,255,255,0.92);
   backdrop-filter: blur(6px);
   padding: 16px;
+}
+
+body:not(.modView) .hudRoot {
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.playersStage {
+  width: 100%;
 }
 
 .modMainFrame{

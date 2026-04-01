@@ -22,7 +22,14 @@
     <div class="card">
       <div class="row">
         <div class="label">名前</div>
-        <div id="name" class="value">-</div>
+        <div class="nameValueWrap">
+          <div id="name" class="value">-</div>
+          <button id="editNameBtn" class="iconPencilBtn" type="button" title="名前を変更" aria-label="名前を変更">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm14.71-9.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.54 1.54 3.75 3.75 1.71-1.37z"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="row">
         <div class="label">得点</div>
@@ -32,25 +39,17 @@
         <div class="label">誤答</div>
         <div id="wrongCount" class="value">0</div>
       </div>
-      <div class="info-row">
-        <span class="info-label">現在の順位</span>
-        <span class="info-value" id="pointRank">-</span>
+      <div class="row">
+        <div class="label">現在の順位</div>
+        <div id="pointRank" class="value">-</div>
       </div>
       <div class="row">
         <div class="label">休み</div>
         <div id="rest" class="value">休み あと0問</div>
       </div>
-      <div class="row">
-        <div class="label">着順</div>
-        <div id="rank" class="value">-</div>
-      </div>
-      <div class="row">
-        <div class="label">着差</div>
-        <div id="gap" class="value">-</div>
-      </div>
     </div>
   </aside>
 
-<script type="module" src="/player/player.js?v=20260108_01"></script>
+<script type="module" src="/player/player.js?v=20260329_02"></script>
 </body>
 </html>

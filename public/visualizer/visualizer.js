@@ -10,7 +10,7 @@ const joinQrHint = document.querySelector("#joinQrHint");
 let lastState = null;
 
 // 着差の有効桁数
-const gapDigits = 4
+const gapDigits = 3
 
 // ここが重要：onStateの外で保持する
 let lastSfxNonce = 0;
@@ -111,8 +111,9 @@ function getCurrentRespondent(st) {
 }
 
 function buildBuzzInfo(st) {
+  const buzzOrder = st.buzzer?.buzzOrder || [];
   const orderMap = new Map(); // playerId -> { order, at }
-  (st.buzzer?.buzzOrder || []).forEach((b, idx) => {
+  buzzOrder.forEach((b, idx) => {
     orderMap.set(b.playerId, { order: idx + 1, at: b.at });
   });
   const firstAt = st.buzzer?.firstBuzz?.at ?? null;
@@ -126,6 +127,115 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function ordinalShortEn(n) {
+  const x = n % 100;
+  if (x >= 11 && x <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function formatGapSeconds(ms) {
+  if (!Number.isFinite(ms) || ms >= 10000) return "-";
+  return `+${(ms / 1000).toFixed(gapDigits)}s`;
+}
+
+function formatBuzzOrder(order, gapText) {
+  if (!order) return "";
+  const ord = ordinalShortEn(order);
+  if (order === 1 || !gapText || gapText === "-") return ord;
+  return `${ord} ${gapText}`;
+}
+
+function formatVerticalBuzzOrder(order, gapText) {
+  if (!order) return "";
+  const ord = ordinalShortEn(order);
+  if (order === 1 || !gapText || gapText === "-") {
+    return `<span class="verticalBuzzRank">${ord}</span>`;
+  }
+  return `<span class="verticalBuzzRank">${ord}</span><span class="verticalBuzzGap">${escapeHtml(gapText)}</span>`;
+}
+
+function getRankGroup(p) {
+  const status = String(p?.status || "active");
+  if (status === "qualified") return 0;
+  if (status === "disqualified") return 2;
+  return 1;
+}
+
+function compareRankOrder(a, b, connectionOrderMap = new Map()) {
+  const groupDiff = getRankGroup(a) - getRankGroup(b);
+  if (groupDiff !== 0) return groupDiff;
+
+  const group = getRankGroup(a);
+  if (group === 0) {
+    const aPass = Number(a?.passRank ?? Number.MAX_SAFE_INTEGER);
+    const bPass = Number(b?.passRank ?? Number.MAX_SAFE_INTEGER);
+    if (aPass !== bPass) return aPass - bPass;
+    const aAt = Number(a?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    const bAt = Number(b?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    return aAt - bAt;
+  }
+
+  if (group === 1) {
+    const scoreDiff = Number(b?.score ?? 0) - Number(a?.score ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+    if (wrongDiff !== 0) return wrongDiff;
+    return (connectionOrderMap.get(a?.id) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?.id) ?? Number.MAX_SAFE_INTEGER);
+  }
+
+  const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+  if (wrongDiff !== 0) return wrongDiff;
+  const connectionDiff = (connectionOrderMap.get(a?.id) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?.id) ?? Number.MAX_SAFE_INTEGER);
+  if (connectionDiff !== 0) return connectionDiff;
+  const dqAtDiff = Number(a?.dqAt ?? Number.MAX_SAFE_INTEGER) - Number(b?.dqAt ?? Number.MAX_SAFE_INTEGER);
+  if (dqAtDiff !== 0) return dqAtDiff;
+  return String(a?.name || "").localeCompare(String(b?.name || ""), "ja");
+}
+
+function isSameRankBucket(a, b) {
+  const groupA = getRankGroup(a);
+  const groupB = getRankGroup(b);
+  if (groupA !== groupB) return false;
+
+  if (groupA === 0) return Number(a?.passRank ?? 0) === Number(b?.passRank ?? 0);
+  if (groupA === 1) {
+    return Number(a?.score ?? 0) === Number(b?.score ?? 0) &&
+      Number(a?.wrongCount ?? 0) === Number(b?.wrongCount ?? 0);
+  }
+  return Number(a?.wrongCount ?? 0) === Number(b?.wrongCount ?? 0);
+}
+
+function buildRankMap(players, connectionOrderMap) {
+  const sorted = [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  const rankMap = new Map();
+  let lastPlayer = null;
+  let currentRank = 0;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const player = sorted[i];
+    if (!lastPlayer || !isSameRankBucket(lastPlayer, player)) {
+      currentRank = i + 1;
+    }
+    rankMap.set(player.id, currentRank);
+    lastPlayer = player;
+  }
+
+  return rankMap;
+}
+
+function renderRankBadge(rank, className) {
+  const text = ordinalShortEn(rank);
+  if (rank === 1) {
+    return `<span class="${className} rankBadge is-first"><i class="fa-solid fa-crown" aria-hidden="true"></i><span>${text}</span></span>`;
+  }
+  return `<span class="${className} rankBadge"><span>${text}</span></span>`;
 }
 
 function renderJoinQr(st) {
@@ -161,46 +271,102 @@ function renderJoinQr(st) {
   joinQrImg.src = dataUrl;
 }
 
+function getOrderedConnectedPlayers(st) {
+  const playersById = st.players || {};
+  const order = Array.isArray(st.ui?.playerOrder) ? st.ui.playerOrder : [];
+  const connectedIds = Object.keys(playersById).filter((id) => playersById[id]?.connected !== false);
+  const connectedSet = new Set(connectedIds);
+  const result = [];
+  const seen = new Set();
+
+  for (const id of order) {
+    const key = String(id || "");
+    if (!connectedSet.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(playersById[key]);
+  }
+
+  for (const id of connectedIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    result.push(playersById[id]);
+  }
+
+  return result;
+}
+
+function buildConnectionOrderMap(players) {
+  const orderMap = new Map();
+  players.forEach((p, idx) => {
+    orderMap.set(p.id, idx);
+  });
+  return orderMap;
+}
+
 function renderPlayers(st, mode = "full") {
   const grid = document.querySelector("#playersGrid");
   grid.innerHTML = "";
 
-  const players = Object.values(st.players || {});
+  const players = getOrderedConnectedPlayers(st);
+  const connectionOrderMap = buildConnectionOrderMap(players);
   const { orderMap, firstAt } = buildBuzzInfo(st);
-
-  // 並び：押した人（押下順）→ まだ押してない人（名前順）
-  const pressed = players
-    .filter(p => orderMap.has(p.id))
-    .sort((a, b) => orderMap.get(a.id).order - orderMap.get(b.id).order);
-
-  const notPressed = players
-    .filter(p => !orderMap.has(p.id))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), "ja"));
-
-  const sorted = [...pressed, ...notPressed];
-
-  const cur = getCurrentRespondent(st);
-  const currentPlayerId = cur?.playerId ?? null;
-  const wrongSet = st.judge?.wrongSet || {};
-
   const ui = st.ui || {};
   const showScore = ui.showScore !== false;
+  const showCorrectCount = ui.showCorrectCount !== false;
   const showWrongCount = ui.showWrongCount !== false;
   const showMarks = !!ui.showMarks;
   const showMarkCorrect = ui.showMarkCorrect !== false;
   const showMarkWrong = ui.showMarkWrong !== false;
+  const isVerticalLayout = ui.playerTileLayout === "vertical" && mode === "full";
+  const visualizerSortMode = String(ui.visualizerSortMode || "manual");
+  const showVerticalScore = ui.showVerticalScore !== false;
+  const showVerticalCorrectCount = ui.showVerticalCorrectCount !== false;
+  const showVerticalWrongCount = ui.showVerticalWrongCount !== false;
+  const showVerticalRestCount = ui.showVerticalRestCount !== false;
+  const showVerticalBuzzOrder = ui.showVerticalBuzzOrder !== false;
+  const rankMap = buildRankMap(players, connectionOrderMap);
+
+  grid.classList.toggle("verticalMode", isVerticalLayout);
+
+  // 並び：押した人（押下順）→ まだ押してない人（名前順）
+  const rankSortedPlayers = [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  const pressed = rankSortedPlayers
+    .filter(p => orderMap.has(p.id))
+    .sort((a, b) => orderMap.get(a.id).order - orderMap.get(b.id).order);
+
+  const notPressed = rankSortedPlayers.filter(p => !orderMap.has(p.id));
+
+  const sorted = visualizerSortMode === "rank"
+    ? [...pressed, ...notPressed]
+    : players;
+
+  const cur = getCurrentRespondent(st);
+  const currentPlayerId = cur?.playerId ?? null;
+  const wrongSet = st.judge?.wrongSet || {};
   
   function repeatSafe(ch, n, max = 30) {
     const k = Math.max(0, Math.min(Number(n ?? 0) | 0, max));
     return k > 0 ? ch.repeat(k) : "";
   }
 
+  function getVerticalNameClass(name) {
+    const len = Array.from(String(name || "")).length;
+    if (len >= 20) return "verticalName verticalName-xxxs";
+    if (len >= 16) return "verticalName verticalName-xxs";
+    if (len >= 13) return "verticalName verticalName-xs";
+    if (len >= 10) return "verticalName verticalName-sm";
+    return "verticalName";
+  }
+
   for (const p of sorted) {
     const info = orderMap.get(p.id) || null;
     const order = info ? info.order : null;
+    const scoreRank = rankMap.get(p.id) ?? 1;
 
     let gapText = "-";
-    if (info && firstAt != null && order >= 2) gapText = `+${(info.at - firstAt).toFixed(gapDigits)}ms`;
+    if (info && firstAt != null && order >= 2) gapText = formatGapSeconds(info.at - firstAt);
+    const gridGapText = info ? gapText : "";
+    const buzzOrderText = formatBuzzOrder(order, gapText);
 
     const isCurrent = currentPlayerId === p.id;
     const isWronged = !!wrongSet[p.id];
@@ -210,6 +376,7 @@ function renderPlayers(st, mode = "full") {
 
     const restCount = Number(p.restCount ?? 0);
     const isResting = restCount > 0;
+    const restBadge = isResting ? `<div class="restBadge" title="休み ${restCount}"><span class="restBadgeIcon">休</span><span class="restBadgeValue">${restCount}</span></div>` : "";
 
     const status = p.status || "active";
     const isQualified = status === "qualified";
@@ -218,9 +385,13 @@ function renderPlayers(st, mode = "full") {
     const correctCount = Number(p.correctCount ?? 0);
     const wrongCount = Number(p.wrongCount ?? 0);
 
-    const marks = showMarks
-      ? `${showMarkCorrect ? repeatSafe("○", correctCount) : ""}${showMarkWrong ? repeatSafe("×", wrongCount) : ""}`.trim()
-      : "";
+    const markCorrectText = showMarks && showMarkCorrect ? repeatSafe("○", correctCount) : "";
+    const markWrongText = showMarks && showMarkWrong ? repeatSafe("✕", wrongCount) : "";
+    const showMarksRow = !!showMarks;
+    const countSummary = [
+      showCorrectCount ? `<span class="countSummaryItem countSummaryCorrect">○${correctCount}</span>` : "",
+      showWrongCount ? `<span class="countSummaryItem countSummaryWrong">✕${wrongCount}</span>` : ""
+    ].filter(Boolean).join("");
 
     const reachWin = !!p.reach?.qualify;
     const reachLose = !!p.reach?.dq;
@@ -231,6 +402,7 @@ function renderPlayers(st, mode = "full") {
     const tile = document.createElement("div");
     tile.className =
       "tile" +
+      (isVerticalLayout ? " verticalTile" : "") +
       (isQualified ? " qualified" : "") +
       (isDq ? " disqualified" : "") +
       (info ? " pressed" : "") +
@@ -240,65 +412,67 @@ function renderPlayers(st, mode = "full") {
       (isCorrect ? " correct" : "") +
       (isResting ? " resting" : "");
 
-    if (mode === "compact") {
+    if (isVerticalLayout) {
+      const verticalBuzzText = showVerticalBuzzOrder ? formatVerticalBuzzOrder(order, gapText) : "";
+      const verticalStats = [
+        showVerticalScore ? `<span class="verticalStat verticalStat-score">${Number(p.score ?? 0)}</span>` : "",
+        showVerticalCorrectCount ? `<span class="verticalStat verticalStat-correct"><span class="verticalStatGlyph verticalStatGlyph-circle">○</span><span class="verticalStatValue">${correctCount}</span></span>` : "",
+        showVerticalWrongCount ? `<span class="verticalStat verticalStat-wrong"><span class="verticalStatGlyph verticalStatGlyph-cross">✕</span><span class="verticalStatValue">${wrongCount}</span></span>` : "",
+        showVerticalRestCount ? `<span class="verticalStat verticalStat-rest"><span class="verticalStatGlyph verticalStatGlyph-rest">休</span><span class="verticalStatValue">${restCount}</span></span>` : ""
+      ].filter(Boolean).join("");
+
+      tile.innerHTML = `
+        ${renderRankBadge(scoreRank, "verticalRank")}
+        <div class="${getVerticalNameClass(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+        <div class="verticalBuzzRow${verticalBuzzText ? "" : " is-empty"}">${verticalBuzzText || "&nbsp;"}</div>
+        <div class="verticalStats">${verticalStats}</div>
+      `;
+    } else if (mode === "compact") {
       // “名前・得点・押した順”だけ
       tile.innerHTML = `
+        <div class="gridRankRow">
+          ${renderRankBadge(scoreRank, "gridRank")}
+          <div class="gridGap">${restBadge}</div>
+        </div>
         <div class="nameRow">
           <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
           ${showScore ? `<div class="score">${Number(p.score ?? 0)}</div>` : ``}
         </div>
-        <div class="meta">
-          <div class="kv">
-            <div class="k">押</div>
-            <div class="v">${order ? `${order}位` : "-"}</div>
-          </div>
-          <div class="kv">
-            <div class="k">差</div>
-            <div class="v">${gapText}</div>
-          </div>
+        ${(countSummary || buzzOrderText) ? `
+        <div class="countSummaryRow">
+          ${buzzOrderText ? `<div class="buzzOrderInline">${escapeHtml(buzzOrderText)}</div>` : `<div></div>`}
+          ${countSummary ? `<div class="countSummary">${countSummary}</div>` : ``}
         </div>
+        ` : ``}
       `;
     } else {
       // 従来（full）
       tile.innerHTML = `
+        <div class="gridRankRow">
+          ${renderRankBadge(scoreRank, "gridRank")}
+          <div class="gridGap">${restBadge}</div>
+        </div>
         <div class="nameRow">
           <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
           ${reachHtml}
           ${showScore ? `<div class="score">${Number(p.score ?? 0)}</div>` : ``}
         </div>
-
-        ${(showWrongCount || showMarks) ? `
-        <div class="meta">
-          ${showWrongCount ? `
-          <div class="kv">
-            <div class="k">誤答</div>
-            <div class="v">${wrongCount}</div>
-          </div>
-          ` : ``}
-
-          ${showMarks ? `
-          <div class="kv">
-            <div class="k">○×</div>
-            <div class="v">${escapeHtml(marks || "-")}</div>
-          </div>
-          ` : ``}
+        ${(countSummary || buzzOrderText) ? `
+        <div class="countSummaryRow">
+          ${buzzOrderText ? `<div class="buzzOrderInline">${escapeHtml(buzzOrderText)}</div>` : `<div></div>`}
+          ${countSummary ? `<div class="countSummary">${countSummary}</div>` : ``}
         </div>
         ` : ``}
 
-        <div class="meta">
-          <div class="kv">
-            <div class="k">押した順</div>
-            <div class="v">${order ? `${order}位` : "-"}</div>
-          </div>
-          <div class="kv">
-            <div class="k">先着差</div>
-            <div class="v">${gapText}</div>
-          </div>
-          <div class="kv">
-            <div class="k">休み</div>
-            <div class="v">${restCount}</div>
+        ${showMarksRow ? `
+        <div class="meta marksMeta">
+          <div class="marksLine">
+            <span class="marksCorrect${markCorrectText ? "" : " is-empty"}">${markCorrectText ? escapeHtml(markCorrectText) : "&nbsp;"}</span>
+            <span class="marksWrong${markWrongText ? "" : " is-empty"}">${markWrongText ? escapeHtml(markWrongText) : "&nbsp;"}</span>
           </div>
         </div>
+        ` : ``}
+
       `;
     }
 
@@ -309,6 +483,7 @@ function renderPlayers(st, mode = "full") {
 
 client.onState((st) => {
   lastState = st;
+  document.body.classList.toggle("swapJudgeColors", !!st.ui?.swapJudgeColors);
 
   // 先にUIを更新（音で描画が遅れないようにする）
   if(st.buzzer.firstBuzz != null){
@@ -325,7 +500,7 @@ client.onState((st) => {
     const base = modActive ? "compact" : "full";
 
     // 人数が多ければ先に落とす（目安）
-    const n = Object.keys(st.players || {}).length;
+    const n = Object.values(st.players || {}).filter((p) => p?.connected !== false).length;
     let mode = base;
     if (modActive && n >= 9) mode = "pressedOnly"; // 目安：増えたら一気に押した人だけ
 
@@ -340,6 +515,12 @@ client.onState((st) => {
   // ここから音（描画の後・awaitしない）
   const s = st.sfx;
   const nonce = Number(s?.nonce ?? 0);
+
+  // MOD切替などでvisualizerが再読込された直後は、
+  // 直前stateのSFXを再生せず現在値を基準にする。
+  if (lastSfxNonce === 0) {
+    lastSfxNonce = nonce;
+  }
 
   if (nonce !== 0 && nonce !== lastSfxNonce) {
     lastSfxNonce = nonce;
@@ -415,4 +596,3 @@ client.onState((st) => {
 
 
 });
-

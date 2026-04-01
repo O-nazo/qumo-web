@@ -1,87 +1,251 @@
-body {
+:root{
+  --bg: #000;
+  --panel: #0b0b0b;
+
+  --frame: #f2f2f2;
+  --frameShadow: rgba(0,0,0,0.55);
+
+  /* テロップ高さ固定 */
+  --telopH: 140px;
+
+  /* 金属シャッターの色味 */
+  --metal1: #0c0f12;
+  --metal2: #1b2026;
+  --metal3: #2b313a;
+  --metal4: #0a0c0f;
+
+  --telopBg: rgba(0,0,0,0.75);
+  --telopFrame: rgba(255,255,255,0.9);
+}
+
+html, body{ height: 100%; }
+
+body{
   margin: 0;
-  background: #000;
+  background: var(--bg);
   color: #fff;
   font-family: sans-serif;
-}
-
-#stage {
-  display: flex;
-  height: 100vh;
-}
-
-#image-area {
-  position: relative;
-  flex: 2;
   overflow: hidden;
-  background: #111;
 }
 
-#q-image {
+@font-face{
+  font-family: "Makinas4Square";
+  src:
+    local("マキナス 4 Square"),
+    local("Makinas 4 Square"),
+    local("Makinas4Square");
+}
+
+
+/* 窓＋テロップを“固定”配置（テロップ表示でずれない） */
+#stage{
+  height: 100vh;
+  width: 100vw;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+#scene{
+  position: relative;
+  width: min(92vw, 1280px);
+  aspect-ratio: 16 / 9;   /* 窓の比率を固定 */
+}
+
+
+/* 8角形枠 */
+#window-frame{
+  position: relative;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 18px 18px var(--frameShadow));
+}
+
+#window-frame::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--frame);
+  clip-path: polygon(
+    12% 0%,
+    88% 0%,
+    100% 12%,
+    100% 88%,
+    88% 100%,
+    12% 100%,
+    0% 88%,
+    0% 12%
+  );
+}
+
+/* 内側 */
+#window-inner{
+  position: absolute;
+  inset: 10px;
+  background: var(--panel);
+  clip-path: polygon(
+    12% 0%,
+    88% 0%,
+    100% 12%,
+    100% 88%,
+    88% 100%,
+    12% 100%,
+    0% 88%,
+    0% 12%
+  );
+  overflow: hidden;
+}
+
+/* 問題画像：蓋のさらに下 */
+#q-image{
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
+  z-index: 1;
 }
 
-/* 蓋 */
-.lid {
+/* 蓋（上下） */
+.lid{
   position: absolute;
   left: 0;
   width: 100%;
   height: 50%;
-  background: #000;
-  transition: transform 0.6s ease;
-  z-index: 10;
+  z-index: 30;
+  overflow: hidden;
+
+  /* 鉄製シャッターっぽい配色：金属の反射＋細いスリット */
+  background:
+    /* 上下の反射 */
+    linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.18),
+      rgba(255,255,255,0.03) 18%,
+      rgba(0,0,0,0.35) 55%,
+      rgba(255,255,255,0.08) 85%,
+      rgba(0,0,0,0.45)
+    ),
+    /* シャッターの横スリット */
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.06),
+      rgba(255,255,255,0.06) 2px,
+      rgba(0,0,0,0.20) 2px,
+      rgba(0,0,0,0.20) 6px
+    ),
+    linear-gradient(to bottom, var(--metal2), var(--metal1));
+
+  box-shadow:
+    inset 0 2px 0 rgba(255,255,255,0.10),
+    inset 0 -2px 0 rgba(0,0,0,0.45);
 }
 
-.lid.top {
-  top: 0;
-  transform: translateY(0);
+/* 上下配置 */
+.lid.top{ top: 0; transform: translateY(0); }
+.lid.bottom{ bottom: 0; transform: translateY(0); }
+
+/* 開く（今まで同様：上下へ引っ込む） */
+#window-inner.open .lid.top{ transform: translateY(-100%); }
+#window-inner.open .lid.bottom{ transform: translateY(100%); }
+
+.lid{
+  transition: transform 0.1s steps(10, end);
 }
 
-.lid.bottom {
-  bottom: 0;
-  transform: translateY(0);
-}
-
-#image-area.open .lid.top {
-  transform: translateY(-100%);
-}
-#image-area.open .lid.bottom {
-  transform: translateY(100%);
-}
-
-/* 右側 */
-#answer-area {
-  flex: 1;
-  padding: 24px;
-  font-size: 28px;
-  background: #222;
-  box-sizing: border-box;
-}
-
-#q-text {
-  font-size: 22px;
-  opacity: 0.85;
-  margin-bottom: 16px;
-}
-
-#answer-text {
-  font-size: 36px;
-  font-weight: 700;
-  white-space: pre-wrap;
-}
-
-/* デバッグ */
-#debug {
+/* 問題文：全文を“同じ位置”で2回描画し、上下で見える領域だけ変える */
+.qtext{
   position: absolute;
-  left: 12px;
-  top: 12px;
-  z-index: 20;
-  font-size: 14px;
-  background: rgba(0,0,0,0.55);
-  padding: 8px 10px;
-  border-radius: 8px;
-  white-space: pre;
+  left: 50%;
+  width: min(90%, 1100px);
+  font-family: "Makinas4Square", sans-serif;
+  font-style: italic;
+
+  /* “全文”のキャンバスを窓全体の高さにする */
+  height: 200%;                 /* ← 蓋(50%)の2倍 = 窓(100%) */
+  display: grid;
+  place-items: center;
+
+  transform: translateX(-50%);
+
+  text-align: center;
+  font-weight: normal;
+  letter-spacing: 0.02em;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  /* フタに“書かれてる”感 */
+  color: #fff;
+  text-shadow:
+    -4px -4px 0 rgba(0,0,0,0.95),
+     4px -4px 0 rgba(0,0,0,0.95),
+    -4px  4px 0 rgba(0,0,0,0.95),
+     4px  4px 0 rgba(0,0,0,0.95),
+     0  10px 22px rgba(0,0,0,0.45);
+
+  /* フォントサイズ：おおむね5倍 */
+  font-size: clamp(120px, 15vw, 500px);
+  line-height: 1.05;
+  padding: 10px 0;
+  box-sizing: border-box;
+
+  z-index: 40; /* 念のため蓋より上 */
+}
+
+/* 上蓋：全文キャンバスの上半分が見えるように配置 */
+.lid.top .qtext{
+  top: 0;                       /* 窓の上端に合わせる */
+}
+
+/* 下蓋：全文キャンバスを半分上にずらして、下半分が見えるようにする */
+.lid.bottom .qtext{
+  top: -100%;                   /* 1枚分(=蓋の高さ) 上へ */
+}
+
+/* 解答テロップ（高さ固定） */
+#telop{
+  position: absolute;
+  left: 50% !important;
+  right: auto !important;
+  bottom: 4%;
+  transform: translateX(-50%) !important;
+
+  width: 86%;              /* 好みで 80〜94% */
+  max-width: 1200px;
+
+  pointer-events: none;
+  display: block;          /* flex 競合を潰す */
+}
+
+#telop-inner{
+  width: 100%;
+  border: 6px solid var(--telopFrame);
+  background: var(--telopBg);
+  border-radius: 18px;
+  padding: 16px 20px;
+  box-sizing: border-box;
+  filter: drop-shadow(0 10px 12px rgba(0,0,0,0.45));
+}
+
+#answer-text{
+  font-weight: 900;
+  font-size: clamp(28px, 3.2vw, 54px);
+  line-height: 1.1;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 非表示でも高さは維持して、見た目だけ消す（＝窓がずれない） */
+#telop.hidden{
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+#telop{
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.1s ease, transform 0.1s ease;
 }

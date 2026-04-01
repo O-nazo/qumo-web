@@ -7,12 +7,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
-  <div id="topLeftTools">
-    <button id="openRules" class="iconBtn" title="ルール"><i class="fa-solid fa-clipboard-list"></i></button>
-    <button id="openSettings" class="iconBtn" title="設定"><i class="fa-solid fa-gear"></i></button>
-    <button id="openModsSettings" class="iconBtn" title="MOD"><i class="fa-solid fa-puzzle-piece"></i></button>
-  </div>
-
   <div id="overlay" hidden>
     <div class="overlayBg"></div>
 
@@ -50,27 +44,6 @@
             問
           </label>
         </div>
-      </div>
-
-      <div class="overlayPanel" id="settingsPanel" hidden>
-        <h2>設定</h2>
-        <div class="row">
-          <label>
-            <input id="autoNextEnabled" type="checkbox">
-            自動で次問へ
-          </label>
-          <label>
-            待ち時間
-            <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
-            ms
-          </label>
-        </div>
-
-        <label>
-          シンキング秒数
-          <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
-          秒
-        </label>
 
         <div class="row">
           <label>
@@ -108,35 +81,150 @@
           <input id="dqWrongCount" type="number" value="3" style="width:80px;">
         </div>
 
+      </div>
+
+      <div class="overlayPanel" id="settingsPanel" hidden>
+        <h2>設定</h2>
         <div class="row">
           <label>
-            <input id="qualifyReachEnabled" type="checkbox">
-            勝ち抜けリーチ演出
+            <input id="autoNextEnabled" type="checkbox">
+            自動で次問へ
           </label>
           <label>
-            <input id="dqReachEnabled" type="checkbox">
-            失格リーチ演出
+            待ち時間
+            <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
+            ms
           </label>
         </div>
-        <div class="row">
-          <label><input id="showScore" type="checkbox" checked> 得点表示</label>
-          <label><input id="showWrongCount" type="checkbox" checked> 誤答回数表示</label>
+
+        <label>
+          シンキング秒数
+          <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
+          秒
+        </label>
+
+        <div class="modalSection">
+          <div class="modalSectionTitle">プリセット</div>
+          <div class="modalSectionBody">
+            <div class="row">
+              <button id="exportRulePreset" type="button">プリセット出力</button>
+            </div>
+            <div class="row">
+              <label>
+                プリセット選択
+                <select id="rulePresetSelect" style="width:320px;"></select>
+              </label>
+            </div>
+            <div class="row">
+              <button id="applyRulePreset" type="button">適用</button>
+              <button id="refreshRulePresets" type="button">更新</button>
+            </div>
+            <div class="row">
+              <button id="resetControllerPrefs" class="danger" type="button">初期化</button>
+            </div>
+          </div>
         </div>
 
-        <div class="row">
-          <label><input id="showMarks" type="checkbox"> ○×表示</label>
-          <label><input id="showMarkCorrect" type="checkbox" checked> ○</label>
-          <label><input id="showMarkWrong" type="checkbox" checked> ×</label>
+        <div class="modalSection">
+          <div class="modalSectionBody">
+            <div class="row">
+              <div>参加用URL：</div>
+              <span id="joinUrls"></span>
+            </div>
+            <div class="row">
+              <button id="toggleJoinQr">QR表示</button>
+            </div>
+          </div>
         </div>
 
-        <div class="row">
-          <div>参加用URL：</div>
-          <span id="joinUrls"></span>
-        </div>
-        <div class="row">
-          <button id="toggleJoinQr">QR表示</button>
+      </div>
+
+      <div class="overlayPanel" id="visualSettingsPanel" hidden>
+        <h2>表示設定</h2>
+        <div class="modalSection">
+          <div class="modalSectionBody">
+            <div class="row">
+              <label><input id="swapJudgeColors" type="checkbox"> 正誤色を入れ替える</label>
+            </div>
+          </div>
         </div>
 
+        <div class="modalSection">
+          <div class="modalSectionTitle">リーチ演出</div>
+          <div class="modalSectionBody">
+            <div class="row">
+              <label>
+                <input id="qualifyReachEnabled" type="checkbox">
+                勝ち抜けリーチ演出
+              </label>
+              <label>
+                <input id="dqReachEnabled" type="checkbox">
+                失格リーチ演出
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="modalSection">
+          <div class="modalSectionTitle">プレイヤー表示</div>
+          <div class="modalSectionBody">
+            <div class="row">
+              <div id="playerTileLayoutToggle" class="viewToggle" role="group" aria-label="プレイヤー表示切替">
+                <button id="playerTileLayoutGrid" class="viewToggleBtn is-active" type="button" title="グリッド表示" aria-label="グリッド表示">
+                  <i class="fa-solid fa-grip"></i>
+                </button>
+                <button id="playerTileLayoutVertical" class="viewToggleBtn" type="button" title="縦書き表示" aria-label="縦書き表示">
+                  <i class="fa-solid fa-grip-lines-vertical"></i>
+                </button>
+              </div>
+            </div>
+            <div class="row">
+              <label>
+                Controller並び
+                <select id="controllerSortMode">
+                  <option value="manual">マニュアルソート</option>
+                  <option value="rank">ランクソート</option>
+                </select>
+              </label>
+              <label>
+                Visualizer並び
+                <select id="visualizerSortMode">
+                  <option value="manual">マニュアルソート</option>
+                  <option value="rank">ランクソート</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="modalSubsection" id="gridVisualOptions">
+              <div class="modalSubsectionTitle">詳細設定</div>
+              <div class="row">
+                <label><input id="showScore" type="checkbox" checked> 得点表示</label>
+                <label><input id="showCorrectCount" type="checkbox" checked> 正解数表示</label>
+                <label><input id="showWrongCount" type="checkbox" checked> 誤答数表示</label>
+              </div>
+              <div class="row">
+                <label><input id="showMarks" type="checkbox"> ○×表示</label>
+                <label><input id="showMarkCorrect" type="checkbox" checked> ○</label>
+                <label><input id="showMarkWrong" type="checkbox" checked> ✕</label>
+              </div>
+              <div class="row">
+                <label><input id="prioritizePressedPlayers" type="checkbox"> グリッドで押下順を優先</label>
+              </div>
+            </div>
+
+            <div class="modalSubsection" id="verticalVisualOptions" hidden>
+              <div class="modalSubsectionTitle">詳細設定</div>
+              <div class="row">
+                <label><input id="showVerticalScore" type="checkbox" checked> 得点</label>
+                <label><input id="showVerticalCorrectCount" type="checkbox" checked> 正解数</label>
+                <label><input id="showVerticalWrongCount" type="checkbox" checked> 誤答数</label>
+                <label><input id="showVerticalRestCount" type="checkbox" checked> 休み数</label>
+                <label><input id="showVerticalBuzzOrder" type="checkbox" checked> 着順・着差</label>
+              </div>
+            </div>
+
+          </div>
+        </div>
       </div>
 
       <div class="overlayPanel" id="modsSettingPanel" hidden>
@@ -152,48 +240,64 @@
   </div>    
 
   <div id="controllerLayout" class="layout">
-    <div id="controllerRoot" class="main">
+    <section class="leftTopPane">
+      <div id="topLeftTools">
+        <button id="openRules" class="iconBtn" title="ルール"><i class="fa-solid fa-clipboard-list"></i></button>
+        <button id="openVisualSettings" class="iconBtn" title="表示設定"><i class="fa-solid fa-display"></i></button>
+        <button id="openSettings" class="iconBtn" title="設定"><i class="fa-solid fa-gear"></i></button>
+        <button id="openModsSettings" class="iconBtn" title="MOD"><i class="fa-solid fa-puzzle-piece"></i></button>
+        <button id="toggleJoinQrTop" class="iconBtn" title="QRコード表示"><i class="fa-solid fa-qrcode"></i></button>
+        <button id="acReset" class="iconBtn iconBtnDanger topToolsSpacer" title="AC">AC</button>
+      </div>
 
-      <h2>進行</h2>
-      <div class="row">
-        <button id="present">出題</button>
-        <div class="row">
-          <button id="acReset" class="danger">AC</button>
+      <div id="controllerRoot" class="mainTop">
+        <div class="progressPanel">
+        <div class="row progressRow progressActions">
+          <div class="progressMainButtons">
+            <label class="qnoInline">
+              <span>Q</span>
+              <input id="qno" type="number" min="0" step="1" value="1">
+            </label>
+            <button id="present">出題</button>
+            <button id="skip">スルー</button>
+            <button id="thinking">長考</button>
+            <span class="progressDivider" aria-hidden="true"></span>
+            <button id="correct">正解</button>
+            <button id="wrong" class="spacedAfterCorrect">誤答</button>
+          </div>
+          <div class="progressResetWrap">
+            <button id="buzzerReset">リセット</button>
+          </div>
+        </div>
         </div>
       </div>
-
-      <div class="card">
-        <div class="kv"><div class="k">問題数</div><div class="v">第 <span id="qno">1</span> 問</div></div>
-        <div class="kv"><div class="k">現在の解答者</div><div class="v" id="current">-</div></div>
-        <div class="kv"><div class="k">判定状態</div><div class="v" id="judgeStatus">-</div></div>
-        <div class="kv"><div class="k">結果</div><div class="v" id="result">-</div></div>
-      </div>
-
-      <div class="row">
-        <button id="thinking">シンキング</button>
-        <button id="correct">正解</button>
-        <button id="wrong">誤答</button>
-        <button id="skip">スルー</button>
-      </div>
-
-      <h2>Players</h2>
-      <div id="playersGrid" class="grid"></div>
-
-      <script type="module" src="/controller/controller.js"></script>
-
-    </div>
+    </section>
 
     <aside id="modPanel" class="modPanel" hidden>
-      <div class="modPanelHeader">
-        <div class="modTitle" id="modTitle">MOD</div>
-        <button id="modCloseBtn" class="modCloseBtn">CLOSE</button>
-      </div>
-
       <div class="modPanelBody" id="modPanelBody">
         <!-- iframeをここに挿す -->
       </div>
     </aside>
 
+    <section class="playersSection">
+      <div class="sectionHeader">
+        <div class="playersHeaderLeft">
+          <h2>Players</h2>
+          <div id="playersViewToggle" class="viewToggle" role="group" aria-label="Players表示切替">
+            <button id="playersViewGrid" class="viewToggleBtn is-active" type="button" title="グリッド表示" aria-label="グリッド表示">
+              <i class="fa-solid fa-grip"></i>
+            </button>
+            <button id="playersViewTable" class="viewToggleBtn" type="button" title="テーブル表示" aria-label="テーブル表示">
+              <i class="fa-solid fa-table-list"></i>
+            </button>
+          </div>
+        </div>
+        <div id="playerCount" class="playerCount">0人接続中</div>
+      </div>
+      <div id="playersGrid" class="grid playersGrid"></div>
+    </section>
+
+    <script type="module" src="/controller/controller.js"></script>
   </div>
 </body>
 </html>

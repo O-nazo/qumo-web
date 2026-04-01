@@ -21,15 +21,27 @@ body {
   margin: 0;
   min-height: 100vh;
   box-sizing: border-box;
+  position: relative;
+  background:
+    linear-gradient(rgba(255,255,255,0.9), rgba(255,255,255,0.9)),
+    #f5f5f5;
 }
 
-/* ===== PC / Tablet: 2 columns (center UI | card) ===== */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    url("/logo/Logo_ver.png") center center / min(50vw, 520px) auto no-repeat;
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ===== Unified layout: info card below the main button ===== */
 body {
-  display: grid;
-  grid-template-columns: 1fr min(var(--side-w), 42vw);
-  gap: var(--gap);
-  align-items: start;
-  padding: 16px;
+  display: block;
+  padding: 0;
 }
 
 /* 中央UI：左カラムで縦に並べて中央揃え（確実版） */
@@ -37,12 +49,13 @@ body {
   /* 追加：min-height に padding を含める */
   box-sizing: border-box;
 
-  grid-column: 1;
-  min-height: calc(100vh - 32px);
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
+  padding: 0 0 190px 0;
   padding-top: var(--top-pad);
   gap: var(--center-gap);
 }
@@ -73,6 +86,10 @@ body {
 
   user-select: none;
   cursor: pointer;
+}
+
+.indicator.is-error {
+  color: #d64545;
 }
 
 .indicator:focus {
@@ -108,6 +125,8 @@ body {
 
   cursor: pointer;
   user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 
   box-shadow: 0 12px 28px rgba(0,0,0,0.25);
 }
@@ -133,16 +152,20 @@ body {
 
 /* 右カラム：カード */
 .side {
-  grid-column: 2;
-  align-self: start;
-  width: min(var(--side-w), 42vw);
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: auto;
+  pointer-events: none;
 }
 
-/* 右側でスクロールしても追従したいなら sticky が便利 */
 @media (min-width: 701px) {
   .side {
-    position: sticky;
-    top: 16px;
+    left: 50%;
+    right: auto;
+    width: min(520px, 78vw);
+    transform: translateX(-50%);
   }
 }
 
@@ -152,6 +175,7 @@ body {
   border-radius: 12px;
   display: grid;
   gap: 8px;
+  pointer-events: auto;
 }
 
 .row {
@@ -162,6 +186,34 @@ body {
 
 .label { opacity: 0.75; }
 .value { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.nameValueWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.iconPencilBtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,0.16);
+  border-radius: 999px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.iconPencilBtn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
 
 /* ボタンのエフェクト用 */
 .bigBtn {
@@ -243,19 +295,13 @@ body {
 
 
 
-/* ===== Mobile: card goes bottom (current behavior OK) ===== */
+/* ===== Mobile tweaks ===== */
 @media (max-width: 700px) {
   :root{
     --top-pad: 10%; /* ここを好みで調整。0にするとピッタリ上詰め */
   }
 
-  body {
-    display: block;
-    padding: 0;
-  }
-
   .center {
-    min-height: 100vh;
     padding: 0 0 170px 0;
     padding-top: var(--top-pad);
     gap: var(--center-gap);
@@ -263,14 +309,6 @@ body {
 
   .indicator {
     width: min(520px, 92vw);
-  }
-
-  .side {
-    position: fixed;
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    width: auto;
   }
 }
 

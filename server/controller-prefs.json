@@ -1,0 +1,40 @@
+{
+  "rules": {
+    "buzzMode": "endless",
+    "restPenalty": 1,
+    "thinkingSeconds": 5,
+    "correctPoints": 1,
+    "wrongPoints": -1,
+    "qualifyEnabled": true,
+    "qualifyScore": 4,
+    "dqEnabled": true,
+    "dqScore": -3,
+    "qualifyCountEnabled": false,
+    "qualifyCorrectCount": 7,
+    "dqWrongEnabled": false,
+    "dqWrongCount": 3,
+    "qualifyReachEnabled": false,
+    "dqReachEnabled": false,
+    "autoNextEnabled": false,
+    "autoNextDelayMs": 800
+  },
+  "ui": {
+    "showScore": true,
+    "showCorrectCount": true,
+    "showWrongCount": true,
+    "controllerSortMode": "rank",
+    "visualizerSortMode": "manual",
+    "playerTileLayout": "vertical",
+    "prioritizePressedPlayers": false,
+    "swapJudgeColors": false,
+    "showVerticalScore": true,
+    "showVerticalCorrectCount": true,
+    "showVerticalWrongCount": true,
+    "showVerticalRestCount": true,
+    "showVerticalBuzzOrder": true,
+    "showMarks": true,
+    "showMarkCorrect": true,
+    "showMarkWrong": true,
+    "joinQrVisible": false
+  }
+}

@@ -58,12 +58,31 @@ function getExternalSfxDir() {
   return chosen; // null の場合もある
 }
 
+function getExternalAssetsDir() {
+  const isPackaged = process.env.QUMO_PACKAGED === "1";
+
+  const devDir = path.join(process.cwd(), "assets");
+  const exeSide = path.join(path.dirname(process.execPath), "assets");
+  const resourcesSide = process.resourcesPath
+    ? path.join(process.resourcesPath, "assets")
+    : null;
+
+  return isPackaged
+    ? pickFirstExistingDir([exeSide, resourcesSide, devDir])
+    : pickFirstExistingDir([devDir]);
+}
+
 const externalSfxDir = getExternalSfxDir();
+const externalAssetsDir = getExternalAssetsDir();
 console.log("[SFX] isPackaged=", process.env.QUMO_PACKAGED, "externalSfxDir=", externalSfxDir);
 
 async function start({ port }) {
   const app = express();
   const publicDir = path.join(__dirname, "..", "public");
+
+  if (externalAssetsDir) {
+    app.use("/assets", express.static(externalAssetsDir));
+  }
 
   if (externalSfxDir) {
     app.use("/assets/sfx", express.static(externalSfxDir));
@@ -98,7 +117,7 @@ async function start({ port }) {
   st0.mods.available = listMods();
   if (st0.mods.active == null) st0.mods.active = null;
 
- 　const ws = createWsServer(server);
+  const ws = createWsServer(server);
 
   const runtime = createModRuntime({
     app,

@@ -6,21 +6,31 @@
 </head>
 <body>
   <div id="stage">
-    <div id="image-area">
-      <img id="q-image" alt="" />
-      <div class="lid top"></div>
-      <div class="lid bottom"></div>
+    <div id="scene">
+      <div id="window-frame">
+        <div id="window-inner">
+          <img id="q-image" alt="" />
 
-      <!-- デバッグ表示（あとで消してOK） -->
-      <div id="debug"></div>
-    </div>
+          <div class="lid top">
+            <div class="qtext" id="q-text"></div>
+          </div>
 
-    <div id="answer-area">
-      <div id="q-text"></div>
-      <div id="answer-text"></div>
+          <div class="lid bottom">
+            <div class="qtext" id="q-text2"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- テロップは窓に重ねる -->
+      <div id="telop" class="hidden">
+        <div id="telop-inner">
+          <div id="answer-text"></div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script src="./main.js"></script>
 </body>
+
 </html>

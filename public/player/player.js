@@ -9,11 +9,14 @@ const nameEl = document.querySelector("#name");
 const scoreEl = document.querySelector("#score");
 const restEl = document.querySelector("#rest");
 const rankEl = document.querySelector("#rank");
-const gapEl = document.querySelector("#gap");
 const pointRankEl = document.querySelector("#pointRank");
 const wrongCountEl = document.querySelector("#wrongCount");
+const editNameBtn = document.querySelector("#editNameBtn");
 
 const client = createClient({ screen: "player", autoJoin: false });
+
+const PLAYER_NAME_STORAGE_KEY = "qumo_player_name";
+const PLAYER_NAME_TTL_MS = 12 * 60 * 60 * 1000;
 
 let joined = false;
 let joining = false;
@@ -24,8 +27,43 @@ let gapDigits = 5;
 let myPlayerId = null;
 let myName = ""; // 未入力
 let nameInputEl = null;
+let nameEditMode = null;
+let pendingNameChange = null;
 let isQualified = null;
 let isDq = null;
+
+function readSavedName() {
+  try {
+    const raw = sessionStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+    if (!raw) return "";
+
+    const parsed = JSON.parse(raw);
+    const value = String(parsed?.value ?? "").slice(0, 20);
+    const expiresAt = Number(parsed?.expiresAt ?? 0);
+
+    if (!value || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+      sessionStorage.removeItem(PLAYER_NAME_STORAGE_KEY);
+      return "";
+    }
+
+    return value;
+  } catch {
+    return "";
+  }
+}
+
+function writeSavedName(name) {
+  const value = String(name ?? "").trim().slice(0, 20);
+  if (!value) {
+    sessionStorage.removeItem(PLAYER_NAME_STORAGE_KEY);
+    return;
+  }
+
+  sessionStorage.setItem(PLAYER_NAME_STORAGE_KEY, JSON.stringify({
+    value,
+    expiresAt: Date.now() + PLAYER_NAME_TTL_MS
+  }));
+}
 
 client.onSelf(({ playerId }) => {
   myPlayerId = playerId;
@@ -38,16 +76,28 @@ client.onMessage?.((msg) => {
   if (msg?.type === "RELOAD") {
     console.log("[visualizer] reload by MOD change");
     location.reload();
+    return;
+  }
+
+  if (msg?.type === "ERROR") {
+    if (pendingNameChange) {
+      myName = pendingNameChange.previous;
+      pendingNameChange = null;
+      nameEl.textContent = myName || "-";
+    }
+    joining = false;
+    bigBtnLabel.textContent = joined ? "PUSH" : "CONNECT";
+    setIndicatorError(toShortErrorText(msg.error));
   }
 });
 
 window.addEventListener("error", (e) => {
-  indicatorEl.textContent = `ERR: ${e.message}`;
+  setIndicatorError(toShortErrorText(e.message));
 });
 
 window.addEventListener("unhandledrejection", (e) => {
   const msg = e.reason?.message ?? String(e.reason);
-  indicatorEl.textContent = `ERR: ${msg}`;
+  setIndicatorError(toShortErrorText(msg));
 });
 
 function ordinal(n) {
@@ -72,35 +122,43 @@ function applyBtnState({ isBlink, isLit, isWrong, isCorrect, isDisabledDim }) {
 }
 
 function setIndicatorText(text) {
+  indicatorEl.classList.remove("is-error");
   indicatorEl.textContent = text;
 }
 
+function setIndicatorError(text) {
+  indicatorEl.classList.add("is-error");
+  indicatorEl.textContent = text;
+}
+
+function toShortErrorText(raw) {
+  const msg = String(raw ?? "").trim();
+  if (!msg) return "ERROR";
+  if (msg.includes("使用中") || msg.includes("使われ")) return "名前重複";
+  if (msg.includes("名前")) return "名前エラー";
+  if (msg.includes("JSON") || msg.includes("WS")) return "通信異常";
+  return "ERROR";
+}
+
 function showNamePrompt() {
-  // 指定：接続前は「(名前を入力>)」
-  setIndicatorText(myName ? myName : "(名前を入力>)");
+  setIndicatorText(myName ? myName : "(名前入力)");
 }
 
 function commitNameIfEditing() {
   const input = indicatorEl.querySelector("input.indicatorInput");
-  if (!input) return;
+  if (!input) return false;
 
-  const v = input.value.trim().slice(0, 20);
-  myName = v;
-
-  // 表示に戻す（既存の関数があるならそれを使ってOK）
-  showNamePrompt();
-  nameEl.textContent = myName || "-";
-
-  // フォーカスを外してキーボードを閉じる
-  input.blur();
+  finalizeNameEdit({ submit: true });
+  return true;
 }
 
-function beginNameEdit() {
-  if (joined) return; // 接続後は編集しない（必要なら外す）
+function beginNameEdit(mode = "join") {
+  if (mode !== "rename" && joined) return;
 
   indicatorEl.innerHTML = "";
   const input = document.createElement("input");
   nameInputEl = input;
+  nameEditMode = mode;
   input.type = "text";
   input.className = "indicatorInput";
   input.placeholder = "名前";
@@ -109,25 +167,62 @@ function beginNameEdit() {
   input.focus();
   input.select();
 
+  input.addEventListener("input", () => {
+    writeSavedName(input.value);
+  });
+
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      finishNameEdit();
+      finalizeNameEdit({ submit: true });
       input.blur(); // 追加：キーボードを閉じる
     }
     if (e.key === "Escape") {
-      showNamePrompt();
-      nameInputEl = null;
+      finalizeNameEdit({ submit: false });
     }
   });
 
-  input.addEventListener("blur", finishNameEdit);
+  input.addEventListener("blur", () => finalizeNameEdit({ submit: true }));
 }
 
-function finishNameEdit() {
+function requestNameChange(nextName) {
+  if (!joined || !myPlayerId) return;
+  const previous = myName;
+  if (nextName === previous) return;
+
+  myName = nextName;
+  pendingNameChange = { previous, next: nextName };
+  nameEl.textContent = nextName || "-";
+  client.emit("CHANGE_NAME", { name: nextName });
+}
+
+function finalizeNameEdit({ submit }) {
   if (!nameInputEl) return;
-  const v = nameInputEl.value.trim().slice(0, 20);
-  myName = v;
+  const nextName = nameInputEl.value.trim().slice(0, 20);
+  const mode = nameEditMode;
   nameInputEl = null;
+  nameEditMode = null;
+
+  if (!submit) {
+    showNamePrompt();
+    return;
+  }
+
+  if (!nextName) {
+    writeSavedName("");
+    showNamePrompt();
+    setIndicatorText("名前入力");
+    nameEl.textContent = myName || "-";
+    return;
+  }
+
+  if (mode === "rename" && joined) {
+    showNamePrompt();
+    requestNameChange(nextName);
+    return;
+  }
+
+  myName = nextName;
+  writeSavedName(myName);
   showNamePrompt();
   nameEl.textContent = myName || "-";
 }
@@ -144,15 +239,72 @@ function isPlayerLike(p) {
   // プレイヤー以外（admin/controller等）を弾きたい場合の保険
   // 使ってない/無いプロパティは自然にスルーされます
   if (p == null) return false;
+  if (p.connected === false) return false;
   if (p.screen && p.screen !== "player") return false;
   if (p.role && p.role !== "player") return false;
   return true;
 }
 
-function computePointsRankFromPlayers(playersById, myPlayerId) {
+function getRankGroup(p) {
+  const status = String(p?.status || "active");
+  if (status === "qualified") return 0;
+  if (status === "disqualified") return 2;
+  return 1;
+}
+
+function compareRankOrder(a, b, connectionOrderMap = new Map()) {
+  const groupDiff = getRankGroup(a) - getRankGroup(b);
+  if (groupDiff !== 0) return groupDiff;
+
+  const group = getRankGroup(a);
+  if (group === 0) {
+    const aPass = Number(a?.passRank ?? Number.MAX_SAFE_INTEGER);
+    const bPass = Number(b?.passRank ?? Number.MAX_SAFE_INTEGER);
+    if (aPass !== bPass) return aPass - bPass;
+    const aAt = Number(a?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    const bAt = Number(b?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    return aAt - bAt;
+  }
+
+  if (group === 1) {
+    const scoreDiff = getPlayerScore(b) - getPlayerScore(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+    if (wrongDiff !== 0) return wrongDiff;
+    return (connectionOrderMap.get(a?._id ?? a?.playerId) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?._id ?? b?.playerId) ?? Number.MAX_SAFE_INTEGER);
+  }
+
+  const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+  if (wrongDiff !== 0) return wrongDiff;
+  const connectionDiff = (connectionOrderMap.get(a?._id ?? a?.playerId) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?._id ?? b?.playerId) ?? Number.MAX_SAFE_INTEGER);
+  if (connectionDiff !== 0) return connectionDiff;
+  const dqAtDiff = Number(a?.dqAt ?? Number.MAX_SAFE_INTEGER) - Number(b?.dqAt ?? Number.MAX_SAFE_INTEGER);
+  if (dqAtDiff !== 0) return dqAtDiff;
+  return String(a?.name || "").localeCompare(String(b?.name || ""), "ja");
+}
+
+function isSameRankBucket(a, b) {
+  const groupA = getRankGroup(a);
+  const groupB = getRankGroup(b);
+  if (groupA !== groupB) return false;
+
+  if (groupA === 0) return Number(a?.passRank ?? 0) === Number(b?.passRank ?? 0);
+  if (groupA === 1) {
+    return getPlayerScore(a) === getPlayerScore(b) &&
+      Number(a?.wrongCount ?? 0) === Number(b?.wrongCount ?? 0);
+  }
+  return Number(a?.wrongCount ?? 0) === Number(b?.wrongCount ?? 0);
+}
+
+function computePointsRankFromPlayers(playersById, myPlayerId, playerOrder = []) {
   const list = Object.entries(playersById || {})
     .map(([id, p]) => ({ ...p, _id: id }))
     .filter(isPlayerLike);
+  const connectionOrderMap = new Map();
+  playerOrder.forEach((id, idx) => connectionOrderMap.set(String(id), idx));
+  list.forEach((p, idx) => {
+    if (!connectionOrderMap.has(p._id)) connectionOrderMap.set(p._id, playerOrder.length + idx);
+  });
 
   const total = list.length;
   if (!myPlayerId || total === 0) return { rank: null, total, tied: false, tieCount: 0 };
@@ -163,22 +315,34 @@ function computePointsRankFromPlayers(playersById, myPlayerId) {
 
   if (!me) return { rank: null, total, tied: false, tieCount: 0 };
 
-  const myScore = getPlayerScore(me);
+  const sorted = [...list].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  let rank = null;
+  let tieCount = 0;
+  let lastPlayer = null;
+  let currentRank = 0;
 
-  const higherCount = list.filter((p) => getPlayerScore(p) > myScore).length;
-  const rank = higherCount + 1; // 同点は同順位（dense）
+  for (let i = 0; i < sorted.length; i++) {
+    const player = sorted[i];
+    if (!lastPlayer || !isSameRankBucket(lastPlayer, player)) {
+      currentRank = i + 1;
+    }
+    if (player._id === me._id || player.playerId === me.playerId) {
+      rank = currentRank;
+      tieCount = sorted.filter((x) => isSameRankBucket(player, x)).length;
+      break;
+    }
+    lastPlayer = player;
+  }
 
-  const tieCount = list.filter((p) => getPlayerScore(p) === myScore).length;
-  const tied = tieCount >= 2;
-
-  return { rank, total, tied, tieCount };
+  return { rank, total, tied: tieCount >= 2, tieCount };
 }
 
 // インジケータクリックで名前入力
-indicatorEl.addEventListener("click", beginNameEdit);
+indicatorEl.addEventListener("click", () => beginNameEdit("join"));
 indicatorEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") beginNameEdit();
+  if (e.key === "Enter") beginNameEdit("join");
 });
+editNameBtn?.addEventListener("click", () => beginNameEdit("rename"));
 
 function handleBigBtn(e) {
   // blur(click消失)より先に確実に拾う
@@ -187,20 +351,25 @@ function handleBigBtn(e) {
 
   if (joined && Date.now() - joinedAt < 400) return;
 
-  // 二重送信防止（pointerdown + touchstart 両方来る端末対策）
-  if (e.type !== "click") {
-    if (handleBigBtn._last && Date.now() - handleBigBtn._last < 250) return;
-    handleBigBtn._last = Date.now();
-  }
+  // 二重送信防止（click + pointer/touch の重複対策）
+  if (handleBigBtn._last && Date.now() - handleBigBtn._last < 250) return;
+  handleBigBtn._last = Date.now();
 
   // 入力中ならこの場で確定（blur待ちにしない）
-  commitNameIfEditing();
+  const wasEditing = commitNameIfEditing();
+  if (wasEditing && joined) return;
 
   if (!joined) {
     if (joining) return;
+
+    if (!myName.trim()) {
+      setIndicatorText("名前入力");
+      return;
+    }
+
     joining = true;
 
-    const nameToSend = (myName || "Player").trim().slice(0, 20);
+    const nameToSend = myName.trim().slice(0, 20);
     myName = nameToSend;
     nameEl.textContent = myName;
 
@@ -217,7 +386,7 @@ function handleBigBtn(e) {
     const ws = findWs(client);
     if (ws) {
       // 0=CONNECTING 1=OPEN 2=CLOSING 3=CLOSED
-      indicatorEl.textContent = `WS state: ${ws.readyState}`;
+      setIndicatorText("接続中");
     }
 
     client.join({ screen: "player", name: myName });
@@ -231,17 +400,30 @@ function handleBigBtn(e) {
   });
 }
 
-// ★ここが肝：capture + pointerdown/touchstart
-bigBtn.addEventListener("pointerdown", handleBigBtn, { capture: true, passive: false });
-bigBtn.addEventListener("touchstart", handleBigBtn, { capture: true, passive: false });
+// iPhone Safari では touchstart/pointerdown + preventDefault の組み合わせで
+// button の通常操作が不安定になりやすいので、click を主系にする。
+bigBtn.addEventListener("click", handleBigBtn, { passive: false });
+
+if (window.PointerEvent) {
+  bigBtn.addEventListener("pointerdown", handleBigBtn, { capture: true, passive: false });
+} else {
+  bigBtn.addEventListener("touchstart", handleBigBtn, { capture: true, passive: false });
+}
 
 // 初期表示
+myName = readSavedName().slice(0, 20);
 showNamePrompt();
-nameEl.textContent = "-";
+nameEl.textContent = myName || "-";
 
 client.onState((st) => {
   // まだJOINしてない場合でもSTATEは来るのでUIは更新する
   const my = (myPlayerId && st.players) ? st.players[myPlayerId] : null;
+  if (my?.name) {
+    myName = my.name;
+    writeSavedName(myName);
+    nameEl.textContent = my.name;
+    if (pendingNameChange?.next === my.name) pendingNameChange = null;
+  }
 
   const score = Number(my?.score ?? 0);
   scoreEl.textContent = String(score);
@@ -251,11 +433,12 @@ client.onState((st) => {
     st.ui?.showWrongCount !== false ? "" : "none";
 
   const restCount = Number(my?.restCount ?? 0);
-  restEl.textContent = `休み あと${restCount}問`;
+  restEl.textContent = `あと${restCount}問`;
 
   const status = my?.status || "active";
   isQualified = status === "qualified";
   isDq = status === "disqualified";
+  const isModDisabled = !!my?.modDisabled;
 
     // --- 早押し順関連（必須） ---
   const order = st.buzzer?.buzzOrder || [];
@@ -277,8 +460,8 @@ client.onState((st) => {
     }
   }
   function fmtGapMs(ms) {
-    // +12.34ms みたいに2桁小数で
-    return `+${ms.toFixed(2)}ms`;
+    if (!Number.isFinite(ms) || ms >= 10000) return null;
+    return `+${(ms / 1000).toFixed(3)}s`;
   }
   function nextEligiblePlayerId(st, sorted) {
     const curIdx = Number(st.judge?.currentIndex ?? -1);
@@ -329,48 +512,26 @@ client.onState((st) => {
     !isCultqLock &&
     !alreadyBuzzed &&
     restCount === 0 &&
+    !isModDisabled &&
     !isQualified &&
     !isDq;
 
-  if (idx === -1) {
-    rankEl.textContent = "-";
-    gapEl.textContent = "-";
-  } else {
-    const rank = idx + 1;
-    rankEl.textContent = `${rank}位`;
-    if (rank >= 2 && st.buzzer.firstBuzz?.at != null) {
-      const gap = order[idx].at - st.buzzer.firstBuzz.at;
-      gapEl.textContent = `+${gap.toFixed(gapDigits)}ms`;
+  if (rankEl) {
+    if (idx === -1) {
+      rankEl.textContent = "-";
     } else {
-      gapEl.textContent = "-";
+      const rank = idx + 1;
+      rankEl.textContent = ordinalShort(rank);
     }
   }
 
     // ポイント順位（サーバー値があればそれを優先）
   if (pointRankEl) {
-    const serverRank =
-      (typeof my?.pointRank === "number") ? my.pointRank :
-      (typeof my?.pointsRank === "number") ? my.pointsRank :
-      null;
-
-    const serverTotal =
-      (typeof my?.pointRankTotal === "number") ? my.pointRankTotal :
-      null;
-
-    const serverTied =
-      (typeof my?.pointRankTied === "boolean") ? my.pointRankTied :
-      null;
-
-    if (serverRank != null) {
-      const total = serverTotal ?? Object.values(st.players || {}).filter(isPlayerLike).length;
-      pointRankEl.textContent = serverTied ? `同率${serverRank}位 / ${total}` : `${serverRank}位 / ${total}`;
-    } else {
-      const pr = computePointsRankFromPlayers(st.players, myPlayerId);
-      pointRankEl.textContent =
-        pr.rank == null ? "-" :
-        pr.tied ? `同率${pr.rank}位 / ${pr.total}` :
-        `${pr.rank}位 / ${pr.total}`;
-    }
+    const pr = computePointsRankFromPlayers(st.players, myPlayerId, st.ui?.playerOrder || []);
+    pointRankEl.textContent =
+      pr.rank == null ? "-" :
+      pr.tied ? `T${ordinalShort(pr.rank)} / ${pr.total}` :
+      `${ordinalShort(pr.rank)} / ${pr.total}`;
   }
 
     // ---- ボタン演出状態 ----
@@ -382,6 +543,7 @@ client.onState((st) => {
   if (!joined) {
     // 接続前は名前プロンプト（指定）
     showNamePrompt();
+    restEl.textContent = "あと0問";
     bigBtnLabel.textContent = "CONNECT";
     bigBtn.disabled = false; // 接続ボタンとして押せる
     return;
@@ -394,13 +556,17 @@ client.onState((st) => {
   else if (isDq) {
     setIndicatorText("DISQUALIFIED");
   }
+  else if (isModDisabled) {
+    setIndicatorText("CLEARED");
+  }
   else if (alreadyBuzzed && myRank >= 0) {
     const r = myRank + 1;
     if (r === 1) {
       setIndicatorText(ordinalShort(r));           // 1st
     } else {
-      const gap = (sorted[myRank].at - sorted[0].at);
-      setIndicatorText(`${ordinalShort(r)} ${fmtGapMs(gap)}`); // 2nd 
+      const gap = sorted[0] ? (sorted[myRank].at - sorted[0].at) : null;
+      const gapText = fmtGapMs(gap);
+      setIndicatorText(gapText ? `${ordinalShort(r)} ${gapText}` : ordinalShort(r));
     }
   } 
   else {
@@ -420,7 +586,7 @@ client.onState((st) => {
       setIndicatorText("MISS");
     } else if (isAnswering) {
       setIndicatorText("ANSWER");
-    } else if (!isLockedForUi && st.buzzer.isOpen && restCount === 0) {
+    } else if (!isLockedForUi && st.buzzer.isOpen && restCount === 0 && !alreadyBuzzed && !isModDisabled) {
       setIndicatorText("READY");
     } else {
       setIndicatorText("WAIT");
@@ -430,8 +596,10 @@ client.onState((st) => {
   bigBtnLabel.textContent =
     isAnswering ? "ANSWER" :
     canBuzz ? "PUSH" :
+    (isModDisabled ? "CLEAR" :
     (restCount > 0 ? "REST" :
-    (isWronged ? "MISS" : "WAIT"));
+    (isWronged ? "MISS" :
+    ((!isCultqLock && st.buzzer.isOpen && restCount === 0 && !alreadyBuzzed && !isModDisabled && !isQualified && !isDq) ? "READY" : "WAIT"))));
 
   bigBtn.disabled = !canBuzz;
 
@@ -468,6 +636,7 @@ client.onState((st) => {
     (
       isWronged ||      // 誤答＝押せない
       restCount > 0 ||  // 休み＝押せない
+      isModDisabled ||  // MODで勝ち抜け済み
       isQualified ||    // 勝ち抜け＝押せない
       isDq              // 失格＝押せない
     );

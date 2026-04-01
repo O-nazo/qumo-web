@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { C2S, S2C } = require("./protocol");
-const { getState, snapshot } = require("./stateStore");
+const { getState, snapshot, persistControllerPrefs, createDefaultControllerPrefs, sanitizePersistedPrefs, applyControllerPrefs } = require("./stateStore");
 const { getModRuntime, setCoreApi } = require("./modRuntimeHub");
 
 const fs = require("fs");
@@ -8,10 +8,12 @@ const path = require("path");
 const QRCode = require("qrcode");
 
 const TUNNEL_FILE = path.resolve(process.cwd(), ".tunnel-url");
+const CONFIG_DIR = path.resolve(process.cwd(), "config");
 
 let cachedTunnelUrl = null;
 let tunnelPollTimer = null;
 let cleanupRegistered = false;
+const WRONG_CHAIN_DELAY_MS = 900;
 
 function genId(len) {
   return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
@@ -238,6 +240,7 @@ function hasAnyEligiblePlayer(st) {
     const id = p.id;
     if (!id) return false;
     if (Number(p.restCount ?? 0) > 0) return false;
+    if (p.modDisabled) return false;
     if (wrongSet[id]) return false;
     const status = p.status || "active";
     if (status === "qualified" || status === "disqualified") return false;
@@ -254,6 +257,7 @@ function canBuzzNow(st, playerId) {
   const p = st.players?.[playerId];
   if (!p) return false;
   if (Number(p.restCount ?? 0) > 0) return false; // 休み中は回答権なし
+  if (p.modDisabled) return false; // MODによる参加停止
   if (st.judge?.wrongSet?.[playerId]) return false; // この問題で誤答した人は押せない
   if (p.status === "qualified" || p.status === "disqualified") return false; // 勝ち抜けor失格は押せない
   return true;
@@ -282,6 +286,97 @@ try {
 }
 }
 
+function refreshJoinQrState(st, onDone = null) {
+  st.ui = st.ui || {};
+
+  const targetUrl = cachedTunnelUrl || readTunnelUrl();
+  st.ui.joinQrTargetUrl = targetUrl || null;
+
+  if (!st.ui.joinQrVisible || !targetUrl) {
+    st.ui.joinQrDataUrl = null;
+    if (typeof onDone === "function") onDone();
+    return;
+  }
+
+  QRCode.toDataURL(targetUrl, { margin: 1, width: 360 })
+    .then((dataUrl) => {
+      const st2 = getState();
+      st2.ui = st2.ui || {};
+      if (!st2.ui.joinQrVisible) {
+        st2.ui.joinQrDataUrl = null;
+        if (typeof onDone === "function") onDone();
+        return;
+      }
+      st2.ui.joinQrTargetUrl = targetUrl;
+      st2.ui.joinQrDataUrl = dataUrl;
+      if (typeof onDone === "function") onDone();
+    })
+    .catch(() => {
+      const st2 = getState();
+      st2.ui = st2.ui || {};
+      st2.ui.joinQrDataUrl = null;
+      if (typeof onDone === "function") onDone();
+    });
+}
+
+function ensureConfigDir() {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
+
+function formatPresetTimestamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join("-");
+}
+
+function listPresetFiles() {
+  ensureConfigDir();
+  return fs.readdirSync(CONFIG_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => /^Rules_\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.json$/i.test(name))
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .reverse();
+}
+
+function updatePresetList(st) {
+  st.configPresets = st.configPresets || {};
+  st.configPresets.files = listPresetFiles();
+}
+
+function exportCurrentPresetFile(st) {
+  ensureConfigDir();
+  const fileName = `Rules_${formatPresetTimestamp()}.json`;
+  const filePath = path.join(CONFIG_DIR, fileName);
+  const payload = {
+    savedAt: new Date().toISOString(),
+    rules: sanitizePersistedPrefs({ rules: st.rules, ui: {} }).rules,
+    ui: sanitizePersistedPrefs({ rules: {}, ui: st.ui }).ui
+  };
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  updatePresetList(st);
+  return fileName;
+}
+
+function loadPresetFile(fileName) {
+  ensureConfigDir();
+  const safeName = path.basename(String(fileName || ""));
+  if (!safeName || !safeName.endsWith(".json")) {
+    throw new Error("プリセット名が不正です");
+  }
+
+  const filePath = path.join(CONFIG_DIR, safeName);
+  const raw = fs.readFileSync(filePath, "utf8");
+  return sanitizePersistedPrefs(JSON.parse(raw));
+}
+
 function createWsServer(httpServer) {
   const { WebSocketServer } = require("ws");
   const wss = new WebSocketServer({ server: httpServer });
@@ -290,6 +385,13 @@ function createWsServer(httpServer) {
 
   // 早稲田式：問題進行はサーバーで自動化
   let autoNextTimer = null;
+  let wrongAdvanceTimer = null;
+
+  function clearWrongAdvanceTimer() {
+    if (!wrongAdvanceTimer) return;
+    clearTimeout(wrongAdvanceTimer);
+    wrongAdvanceTimer = null;
+  }
 
   function scheduleNextQuestion() {
     const st = getState();
@@ -324,7 +426,19 @@ function createWsServer(httpServer) {
     if (st.rules.autoNextDelayMs == null) st.rules.autoNextDelayMs = 800;   // 自動ON時の待ち
     if (!st.ui) st.ui = {};
     if (st.ui.showScore == null) st.ui.showScore = true;
+    if (st.ui.showCorrectCount == null) st.ui.showCorrectCount = true;
     if (st.ui.showWrongCount == null) st.ui.showWrongCount = true;
+    if (st.ui.controllerSortMode == null) st.ui.controllerSortMode = "manual";
+    if (st.ui.visualizerSortMode == null) st.ui.visualizerSortMode = "manual";
+    if (!Array.isArray(st.ui.playerOrder)) st.ui.playerOrder = [];
+    if (st.ui.playerTileLayout == null) st.ui.playerTileLayout = "grid";
+    if (st.ui.prioritizePressedPlayers == null) st.ui.prioritizePressedPlayers = false;
+    if (st.ui.swapJudgeColors == null) st.ui.swapJudgeColors = false;
+    if (st.ui.showVerticalScore == null) st.ui.showVerticalScore = true;
+    if (st.ui.showVerticalCorrectCount == null) st.ui.showVerticalCorrectCount = true;
+    if (st.ui.showVerticalWrongCount == null) st.ui.showVerticalWrongCount = true;
+    if (st.ui.showVerticalRestCount == null) st.ui.showVerticalRestCount = true;
+    if (st.ui.showVerticalBuzzOrder == null) st.ui.showVerticalBuzzOrder = true;
     if (st.ui.showMarks == null) st.ui.showMarks = false;
     if (st.ui.showMarkCorrect == null) st.ui.showMarkCorrect = true;
     if (st.ui.showMarkWrong == null) st.ui.showMarkWrong = true;
@@ -334,6 +448,8 @@ function createWsServer(httpServer) {
     if (st.ui.joinQrDataUrl == null) st.ui.joinQrDataUrl = null;
 
     if (st.questionNo == null) st.questionNo = 1;
+    updatePresetList(st);
+    normalizePlayerOrder(st);
 
     // 初期状態：即受付
     if (!st.phase || st.phase === "lobby") {
@@ -342,6 +458,7 @@ function createWsServer(httpServer) {
   }
 
   ensureInitialized();
+  refreshJoinQrState(getState());
 
    // 1) 起動時に前回の .tunnel-url を消す（これが一番効く）
   safeUnlink(TUNNEL_FILE);
@@ -364,7 +481,7 @@ function createWsServer(httpServer) {
 
       if (u !== cachedTunnelUrl) {
         cachedTunnelUrl = u;
-        broadcastState(); // ここで controller に即反映させる
+        refreshJoinQrState(getState(), broadcastState); // ここで controller に即反映させる
       }
 
       clearInterval(tunnelPollTimer);
@@ -381,6 +498,16 @@ function createWsServer(httpServer) {
     const str = JSON.stringify(msg);
     for (const ws of sockets) {
       if (ws.readyState === ws.OPEN) ws.send(str);
+    }
+  }
+
+  function broadcastToScreens(screens, msg) {
+    const allowed = new Set(screens);
+    const str = JSON.stringify(msg);
+    for (const ws of sockets) {
+      if (ws.readyState !== ws.OPEN) continue;
+      if (!allowed.has(ws.meta?.screen)) continue;
+      ws.send(str);
     }
   }
 
@@ -416,6 +543,42 @@ function createWsServer(httpServer) {
     // 空ならデフォルト
     if (!s) s = "Player";
     return s;
+  }
+
+  function findPlayerByExactName(st, name) {
+    const target = String(name || "");
+    if (!target) return null;
+
+    for (const p of Object.values(st.players || {})) {
+      if (String(p?.name || "") === target) return p;
+    }
+    return null;
+  }
+
+  function normalizePlayerOrder(st, preferredIds = null) {
+    st.ui = st.ui || {};
+
+    const allIds = Object.keys(st.players || {});
+    const existing = new Set(allIds);
+    const base = Array.isArray(preferredIds) ? preferredIds : st.ui.playerOrder;
+    const order = [];
+    const seen = new Set();
+
+    for (const id of Array.isArray(base) ? base : []) {
+      const key = String(id || "");
+      if (!existing.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      order.push(key);
+    }
+
+    for (const id of allIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      order.push(id);
+    }
+
+    st.ui.playerOrder = order;
+    return order;
   }
 
   // NOTE: 以前の「先着収集ウィンドウ」方式は廃止（早稲田式は先着＝即ロック）
@@ -466,22 +629,41 @@ function createWsServer(httpServer) {
           rt?.emit?.(active, "CLIENT_CONNECTED", { screen: ws.meta?.screen || null });
         }
 
-        if (screen === "player") {
-          const name = String(sanitizeName(msg.name) || "Player").slice(0, 20);
-          const playerId = genId(6);
-          ws.meta.playerId = playerId;
+      if (screen === "player") {
+          const rawName = String(msg.name ?? "").trim();
+          if (!rawName) {
+            return send(ws, { type: S2C.ERROR, error: "名前を入力してください" });
+          }
+          const name = String(sanitizeName(rawName)).slice(0, 20);
+          const existing = findPlayerByExactName(st, name);
 
-          st.players[playerId] = {
-            id: playerId,
-            name,
-            correctCount: 0,
-            wrongCount: 0,
-            score: 0,
-            restCount: 0,
-            pendingRestAdd: 0
-          };
+          if (existing?.connected) {
+            return send(ws, { type: S2C.ERROR, error: "その名前は現在使用中です" });
+          }
 
-          send(ws, { type: S2C.SELF, playerId });
+          if (existing) {
+            ws.meta.playerId = existing.id;
+            existing.connected = true;
+            normalizePlayerOrder(st);
+            send(ws, { type: S2C.SELF, playerId: existing.id });
+          } else {
+            const playerId = genId(6);
+            ws.meta.playerId = playerId;
+
+            st.players[playerId] = {
+              id: playerId,
+              name,
+              correctCount: 0,
+              wrongCount: 0,
+              score: 0,
+              restCount: 0,
+              pendingRestAdd: 0,
+              connected: true
+            };
+
+            normalizePlayerOrder(st);
+            send(ws, { type: S2C.SELF, playerId });
+          }
         }
 
         broadcastState();
@@ -496,6 +678,7 @@ function createWsServer(httpServer) {
         const n = Number(msg.restPenalty);
         const clamped = Number.isFinite(n) ? Math.max(0, Math.min(20, Math.floor(n))) : 0;
         st.rules.restPenalty = clamped;
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -523,35 +706,87 @@ function createWsServer(httpServer) {
           }
         }
         
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
 
       if (type === C2S.BUZZER_OPEN) {
         if (ws.meta.screen !== "controller") return;
+        clearWrongAdvanceTimer();
         // 結果表示中なら次問へ、そうでなければ同じ問を受付再開
         startQuestion(st, { increment: (st.judge?.status === "result" || st.phase === "result") });
+        emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
       }
 
       if (type === C2S.BUZZER_RESET) {
         if (ws.meta.screen !== "controller") return;
+        clearWrongAdvanceTimer();
         startQuestion(st, { increment: false });
+        emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
       }
 
       if (type === C2S.NEXT_QUESTION) {
         if (ws.meta.screen !== "controller") return;
+        clearWrongAdvanceTimer();
 
         // 追加: 自動遷移の予約があればキャンセル（手動が優先）
         if (autoNextTimer) {
           clearTimeout(autoNextTimer);
           autoNextTimer = null;
         }
-
+        emitMod("STATE_UPDATED", { at: Date.now() });
         startQuestion(st, { increment: true });
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_QUESTION_NO || "SET_QUESTION_NO")) {
+        if (ws.meta.screen !== "controller") return;
+
+        const n = Number(msg.questionNo);
+        st.questionNo = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : Number(st.questionNo ?? 1);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.CHANGE_NAME || "CHANGE_NAME")) {
+        const isPlayer = ws.meta.screen === "player";
+        const isController = ws.meta.screen === "controller";
+        if (!isPlayer && !isController) return;
+
+        const targetPlayerId = isController
+          ? String(msg.playerId ?? "").trim()
+          : ws.meta.playerId;
+        if (!targetPlayerId) return;
+
+        const p = st.players?.[targetPlayerId];
+        if (!p) return;
+
+        const rawName = String(msg.name ?? "").trim();
+        if (!rawName) {
+          return send(ws, { type: S2C.ERROR, error: "名前を入力してください" });
+        }
+        const name = String(sanitizeName(rawName)).slice(0, 20);
+        const conflict = findPlayerByExactName(st, name);
+        if (conflict && conflict.id !== p.id) {
+          return send(ws, { type: S2C.ERROR, error: "その名前は既に使われています" });
+        }
+
+        p.name = name;
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_PLAYER_ORDER || "SET_PLAYER_ORDER")) {
+        if (ws.meta.screen !== "controller") return;
+
+        const order = Array.isArray(msg.playerOrder) ? msg.playerOrder.map((id) => String(id || "")) : [];
+        normalizePlayerOrder(st, order);
         broadcastState();
         return;
       }
@@ -564,6 +799,7 @@ function createWsServer(httpServer) {
         const d = Number(msg.delayMs);
         st.rules.autoNextDelayMs = Number.isFinite(d) ? Math.max(0, Math.min(10000, Math.floor(d))) : 800;
 
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -624,12 +860,34 @@ function createWsServer(httpServer) {
           const nextIdx = pickNextRespondentIndex(st);
 
           if (nextIdx >= 0) {
-            // すでに押している人の中で次がいる → その人へ回答権
-            emitSfx(st, "wrong", { chainKey: "buzzer" });
-            st.judge.status = "in_progress";
-            st.judge.currentIndex = nextIdx;
-            st.phase = "locked";
+            // 誤答演出中も受付は維持し、演出後に次の回答者表示へ進める
+            emitSfx(st, "wrong");
+            st.judge.status = "idle";
+            st.phase = "open";
+            st.buzzer.isOpen = true;
             broadcastState();
+
+            clearWrongAdvanceTimer();
+            wrongAdvanceTimer = setTimeout(() => {
+              wrongAdvanceTimer = null;
+              const st2 = getState();
+              const nextIdx2 = pickNextRespondentIndex(st2);
+              if (nextIdx2 < 0) {
+                if (hasAnyEligiblePlayer(st2)) {
+                  st2.judge.status = "idle";
+                  st2.phase = "open";
+                  st2.buzzer.isOpen = true;
+                  broadcastState();
+                }
+                return;
+              }
+              st2.judge.status = "in_progress";
+              st2.judge.currentIndex = nextIdx2;
+              st2.phase = "locked";
+              st2.buzzer.isOpen = true;
+              emitSfx(st2, "buzzer");
+              broadcastState();
+            }, WRONG_CHAIN_DELAY_MS);
             return;
           }
 
@@ -706,6 +964,7 @@ function createWsServer(httpServer) {
         const clamped = Number.isFinite(n) ? Math.max(0, Math.min(60, Math.floor(n))) : 0;
         st.rules.thinkingSeconds = clamped;
 
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -718,9 +977,11 @@ function createWsServer(httpServer) {
 
         const c = clampInt(msg.correctCount, 0, 1000000, 0);
         const w = clampInt(msg.wrongCount, 0, 1000000, 0);
+        const r = clampInt(msg.restCount, 0, 1000000, Number(p.restCount ?? 0));
 
         p.correctCount = c;
         p.wrongCount = w;
+        p.restCount = r;
 
         recomputeScores(st);
         recomputePlayerStatuses(st);
@@ -735,6 +996,7 @@ function createWsServer(httpServer) {
 
         recomputeScores(st);
         recomputePlayerStatuses(st);
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -751,6 +1013,7 @@ function createWsServer(httpServer) {
         st.rules.dqReachEnabled = !!msg.dqReachEnabled;
 
         recomputePlayerStatuses(st);
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -762,6 +1025,7 @@ function createWsServer(httpServer) {
         st.rules.dqWrongCount = Number(msg.dqWrongCount ?? 0);
 
         recomputePlayerStatuses(st);
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -770,16 +1034,84 @@ function createWsServer(httpServer) {
         st.ui = st.ui || {};
 
         st.ui.showScore = msg.showScore !== false;
+        st.ui.showCorrectCount = msg.showCorrectCount !== false;
         st.ui.showWrongCount = msg.showWrongCount !== false;
+        st.ui.controllerSortMode = String(msg.controllerSortMode || "manual") === "rank" ? "rank" : "manual";
+        st.ui.visualizerSortMode = String(msg.visualizerSortMode || "manual") === "rank" ? "rank" : "manual";
+        if (!Array.isArray(st.ui.playerOrder)) st.ui.playerOrder = [];
+        st.ui.playerTileLayout = String(msg.playerTileLayout || "grid") === "vertical" ? "vertical" : "grid";
+        st.ui.prioritizePressedPlayers = !!msg.prioritizePressedPlayers;
+        st.ui.swapJudgeColors = !!msg.swapJudgeColors;
+        st.ui.showVerticalScore = msg.showVerticalScore !== false;
+        st.ui.showVerticalCorrectCount = msg.showVerticalCorrectCount !== false;
+        st.ui.showVerticalWrongCount = msg.showVerticalWrongCount !== false;
+        st.ui.showVerticalRestCount = msg.showVerticalRestCount !== false;
+        st.ui.showVerticalBuzzOrder = msg.showVerticalBuzzOrder !== false;
         st.ui.showMarks = !!msg.showMarks;
         st.ui.showMarkCorrect = msg.showMarkCorrect !== false;
         st.ui.showMarkWrong = msg.showMarkWrong !== false;
 
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === "LIST_RULE_PRESETS") {
+        if (ws.meta.screen !== "controller") return;
+        updatePresetList(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === "EXPORT_RULE_PRESET") {
+        if (ws.meta.screen !== "controller") return;
+
+        try {
+          exportCurrentPresetFile(st);
+        } catch (err) {
+          send(ws, { type: S2C.ERROR, error: err?.message || "プリセット保存に失敗しました" });
+        }
+        broadcastState();
+        return;
+      }
+
+      if (type === "APPLY_RULE_PRESET") {
+        if (ws.meta.screen !== "controller") return;
+
+        try {
+          const prefs = loadPresetFile(msg.fileName);
+          applyControllerPrefs(st, prefs);
+          recomputeScores(st);
+          recomputePlayerStatuses(st);
+          persistControllerPrefs(st);
+          refreshJoinQrState(st, broadcastState);
+        } catch (err) {
+          send(ws, { type: S2C.ERROR, error: err?.message || "プリセット適用に失敗しました" });
+        }
+        return;
+      }
+
+      if (type === "RESET_CONTROLLER_PREFS") {
+        if (ws.meta.screen !== "controller") return;
+
+        applyControllerPrefs(st, createDefaultControllerPrefs());
+        recomputeScores(st);
+        recomputePlayerStatuses(st);
+        persistControllerPrefs(st);
+        refreshJoinQrState(st, broadcastState);
+        return;
+      }
+
+      if (type === (C2S.SET_PLAYER_ORDER || "SET_PLAYER_ORDER")) {
+        if (ws.meta.screen !== "controller") return;
+
+        normalizePlayerOrder(st, Array.isArray(msg.playerOrder) ? msg.playerOrder : []);
         broadcastState();
         return;
       }
       if (type === "AC_RESET") {
         if (ws.meta.screen !== "controller") return;
+        clearWrongAdvanceTimer();
 
         for (const p of Object.values(st.players || {})) {
           p.correctCount = 0;
@@ -812,31 +1144,8 @@ function createWsServer(httpServer) {
         const visible = !!msg.visible;
         st.ui = st.ui || {};
         st.ui.joinQrVisible = visible;
-
-        const base = readTunnelUrl();
-        const targetUrl = base ? `${base}` : null;
-
-        // まずは即時反映（visibleだけ先に反映）
-        st.ui.joinQrTargetUrl = targetUrl;
-        st.ui.joinQrDataUrl = null;
-        broadcastState();
-
-        // ON かつ URLが取れている時だけ、非同期でQR生成→完成後に再配信
-        if (visible && targetUrl) {
-          QRCode.toDataURL(targetUrl, { margin: 1, width: 360 })
-            .then((dataUrl) => {
-              const st2 = getState();
-              st2.ui = st2.ui || {};
-              // 生成中にOFFになってたら上書きしない（事故防止）
-              if (!st2.ui.joinQrVisible) return;
-              st2.ui.joinQrTargetUrl = targetUrl;
-              st2.ui.joinQrDataUrl = dataUrl;
-              broadcastState();
-            })
-            .catch(() => {
-              // 失敗しても visible 状態は維持（visualizer側で「生成失敗」表示も可）
-            });
-        }
+        persistControllerPrefs(st);
+        refreshJoinQrState(st, broadcastState);
         return;
       }
 
@@ -934,14 +1243,19 @@ function createWsServer(httpServer) {
 
       if (type === C2S.SET_ACTIVE_MOD) {
         if (ws.meta.screen !== "controller") return;
+        clearWrongAdvanceTimer();
 
         const modIdRaw = String(msg.modId || "").trim();
+        const prevActive = String(st.mods?.active || "").trim();
 
         // ★ 解除（Reset）
         if (modIdRaw === "") {
+          if (prevActive) {
+            getModRuntime()?.emit?.(prevActive, "MOD_DEACTIVATED", {});
+          }
           st.mods.active = null;
           broadcastState();
-          broadcast({ type: S2C.RELOAD });
+          broadcastToScreens(["controller", "visualizer"], { type: S2C.RELOAD });
           return;
         }
 
@@ -951,13 +1265,17 @@ function createWsServer(httpServer) {
           return;
         }
 
+        if (prevActive && prevActive !== modIdRaw) {
+          getModRuntime()?.emit?.(prevActive, "MOD_DEACTIVATED", {});
+        }
+
         st.mods.active = modIdRaw;
         const active = String(getState()?.mods?.active || "");
         if (active) {
           getModRuntime()?.emit?.(active, "MOD_ACTIVATED", {});
         }
         broadcastState();
-        broadcast({ type: S2C.RELOAD });
+        broadcastToScreens(["controller", "visualizer"], { type: S2C.RELOAD });
         return;
       }
 
@@ -1003,7 +1321,9 @@ function createWsServer(httpServer) {
       if (ws.meta?.screen === "player" && ws.meta.playerId) {
         const playerId = ws.meta.playerId;
 
-        if (st.players && st.players[playerId]) delete st.players[playerId];
+        if (st.players && st.players[playerId]) {
+          st.players[playerId].connected = false;
+        }
 
         if (st.buzzer?.buzzOrder?.length) {
           st.buzzer.buzzOrder = st.buzzer.buzzOrder.filter(b => b.playerId !== playerId);

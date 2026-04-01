@@ -15,11 +15,28 @@ body {
 
 .wrap { padding: 12px; }
 
-.row {
+.row,
+.toolbarRow {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 12px;
+}
+
+.toolbarRow {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.toolbarGroup {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbarGroupRight {
+  justify-content: flex-end;
 }
 
 button {
@@ -36,10 +53,18 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.primary { background: #3357ff; border-color: rgba(255,255,255,0.18); }
 button.danger  { background: #c0392b; border-color: rgba(255,255,255,0.18); }
 
+.toolbarRowLarge button {
+  min-height: 52px;
+  padding: 14px 18px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+  min-height: 0;
 }
 @media (min-width: 900px) {
   .grid { grid-template-columns: 1fr 1fr; }
@@ -50,6 +75,7 @@ button.danger  { background: #c0392b; border-color: rgba(255,255,255,0.18); }
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 12px;
+  min-height: 0;
 }
 
 h3 {
@@ -84,13 +110,11 @@ h3 {
 
 .meta .q { font-size: 18px; margin-bottom: 10px; }
 .meta .a { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
-.meta .info { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
-
 .list {
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
-  max-height: 480px;
+  height: 480px;
   overflow-y: auto;
 }
 

@@ -1,3 +1,33 @@
+body {
+  --judge-correct: #2f80ed;
+  --judge-correct-hover: #256fce;
+  --judge-correct-soft: #deeffa;
+  --judge-wrong: #d64545;
+  --judge-wrong-hover: #bb3535;
+  --judge-wrong-soft: #fde0e0;
+  --judge-wrong-border: #c62828;
+}
+
+body.swapJudgeColors {
+  --judge-correct: #d64545;
+  --judge-correct-hover: #bb3535;
+  --judge-correct-soft: #fde0e0;
+  --judge-wrong: #2f80ed;
+  --judge-wrong-hover: #256fce;
+  --judge-wrong-soft: #deeffa;
+  --judge-wrong-border: #7eb6d9;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
 .row { display: flex; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
 
 .card {
@@ -23,11 +53,37 @@
 .tile {
   background: #f6f6f6;
   border-radius: 12px;
-  padding: 12px;
+  padding: 10px;
   display: grid;
-  gap: 8px;
-  border: 3px solid transparent; /* 色変更してもガタつかない */
+  gap: 6px;
+  border: 8px solid transparent; /* 色変更してもガタつかない */
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
   transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.tile > * {
+  position: relative;
+  z-index: 1;
+}
+
+.tileRank {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: rgba(0,0,0,0.65);
+  line-height: 1;
+}
+
+.rankBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rankBadge.is-first {
+  color: #d4a100;
 }
 
 .nameRow {
@@ -38,22 +94,68 @@
 }
 
 .name {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.score {
+.name-sm {
+  font-size: 21px;
+}
+
+.name-xs {
   font-size: 18px;
-  font-weight: 700;
+}
+
+.name-xxs {
+  font-size: 16px;
+}
+
+.nameCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.nameCell .name {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.renameNameText {
+  min-width: 0;
+  flex: 1 1 auto;
+  cursor: text;
+}
+
+.renameNameText.isEditing {
+  padding: 0 2px;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 4px;
+  background: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  outline: none;
+}
+
+.score {
+  font-size: 26px;
+  font-weight: 900;
+  font-family: "Bahnschrift", "Arial Narrow", "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
 }
 
 .meta {
   display: grid;
   gap: 4px;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .kv2 {
@@ -66,30 +168,92 @@
 .v2 { font-variant-numeric: tabular-nums; }
 
 /* 押した人 */
-.tile.pressed { outline: 2px solid #333; }
+.tile.pressed {
+  border-color: #10a651;
+  box-shadow: inset 0 0 0 1px #10a651;
+}
 
 /* 先着 */
-.tile.first { outline: 3px solid #000; }
+.tile.first {
+  border-color: #0a8a42;
+  box-shadow: inset 0 0 0 2px #0a8a42;
+}
 
 /* 現在の解答者 */
-.tile.current { box-shadow: 0 0 0 3px rgba(0,0,0,0.25) inset; }
+@keyframes currentPulse {
+  0%, 100% {
+    border-color: rgba(18, 182, 91, 0.18);
+  }
+  50% {
+    border-color: rgba(18, 182, 91, 1);
+  }
+}
+
+.tile.current {
+  animation: currentPulse 0.45s ease-in-out infinite;
+  border-color: #12b65b;
+  color: #123221;
+}
 
 /* 誤答済み */
 .tile.wrong { opacity: 0.7; }
 
 /* 正解 */
 .tile.correct {
-  border-color: #1b8f3a;
-  background: #d9f7e2;
+  background: var(--judge-correct-soft);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.tile.correct::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 20px;
+  padding: 8px;
+  background: linear-gradient(
+    90deg,
+    #ff004c,
+    #ff7a00,
+    #ffe600,
+    #35ff00,
+    #00e5ff,
+    #3b4bff,
+    #b400ff,
+    #ff004c
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  z-index: 0;
+  pointer-events: none;
+  animation: tileRainbowHue 2.2s linear infinite;
+}
+
+@keyframes tileRainbowHue {
+  from { filter: hue-rotate(0deg); }
+  to { filter: hue-rotate(360deg); }
 }
 
 /* 誤答 */
 .tile.wrong {
-  border-color: #c62828;
-  background: #fde0e0;
+  border-color: var(--judge-wrong-border);
+  background: var(--judge-wrong-soft);
+  box-shadow: none;
 }
 
-.tile.resting { opacity: 0.55; }
+.tile.resting {
+  background: #f6f6f6;
+  border-color: #d2d2d2;
+  color: inherit;
+  box-shadow: none;
+}
+
+.tile.resting .name,
+.tile.resting .score {
+  color: #b8b8b8;
+}
 
 .countEdit {
   display: flex;
@@ -98,11 +262,15 @@
 }
 
 .countInput {
-  width: 72px;
-  padding: 4px 6px;
+  width: 54px;
+  padding: 3px 5px;
+  font-size: 16px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .countBtn {
@@ -132,6 +300,26 @@ button.danger:active {
   filter: brightness(0.95);
 }
 
+#correct {
+  background: var(--judge-correct);
+  color: #fff;
+  border: none;
+}
+
+#correct:hover {
+  background: var(--judge-correct-hover);
+}
+
+#wrong {
+  background: var(--judge-wrong);
+  color: #fff;
+  border: none;
+}
+
+#wrong:hover {
+  background: var(--judge-wrong-hover);
+}
+
 /* 勝ち抜け：虹色の発光枠 */
 .tile.qualified {
   border-color: transparent;
@@ -156,6 +344,11 @@ button.danger:active {
   color: #f2d6d6;
 }
 
+.tile.disqualified .tileRank,
+.tile.disqualified .rankBadge {
+  color: inherit;
+}
+
 /* リーチ表示 */
 .reachTag {
   display: inline-flex;
@@ -169,91 +362,421 @@ button.danger:active {
 }
 
 .reach-win {
-  background: #1976d2;
+  background: var(--judge-correct);
   color: #fff;
 }
 
 .reach-lose {
-  background: #c62828;
+  background: var(--judge-wrong);
   color: #fff;
 }
 
 .tile .row1{
-  display:flex;
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items:center;
-  justify-content:space-between;
   gap:8px;
-}
-.tile .row1 .name{
-  flex:1;
-  min-width:0;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  min-width: 0;
 }
 .tile .row1 .right{
   display:flex;
   align-items:center;
   gap:8px;
+  min-width: 0;
 }
-.tile .row2,.tile .row3{
+.tile .row2,.tile .row3,.tile .row4{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:8px;
-  margin-top:4px;
+  gap:6px;
+  margin-top:2px;
 }
+
+.tile .countsInline {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tile .countPair {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
 .tile .label{
-  width:3em;
-  opacity:0.8;
+  width:auto;
+  flex: 0 0 auto;
+  font-weight: 800;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tile .label-correct {
+  color: var(--judge-correct);
+}
+
+.tile .label-wrong {
+  color: var(--judge-wrong);
+}
+
+.tile .label-rest {
+  color: #10a651;
 }
 .tile .countEdit{
   display:flex;
   align-items:center;
-  gap:6px;
+  gap:0;
+  min-width: 0;
 }
 .tile .countInput{
-  width:72px;
+  width:48px;
+  min-width: 48px;
+  padding: 3px 2px;
+}
+
+.buzzOrderLine {
+  color: #10a651;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: left;
 }
 
 .layout{
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(520px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "leftTop players"
+    "mod players";
+  gap: 16px;
   width: 100%;
   height: 100vh;
   overflow: hidden;
+  padding: 10px 16px 16px;
+  box-sizing: border-box;
 }
 
-.main{
+.leftTopPane {
+  grid-area: leftTop;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  min-height: 0;
+}
+
+.mainTop {
   flex: 1 1 auto;
-  min-width: 560px; /* 既存UIが潰れない最低幅。必要に応じて調整 */
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.08);
+}
+
+.progressPanel {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-height: 100%;
+}
+
+.progressRow {
+  margin: 0;
+}
+
+.progressActions {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progressMainButtons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.progressResetWrap {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.progressDivider {
+  width: 1px;
+  height: 24px;
+  background: rgba(0,0,0,0.16);
+  margin: 0 2px;
+}
+
+.spacedAfterCorrect {
+  margin-left: 8px;
+}
+
+.qnoInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.qnoInline input {
+  width: 48px;
+  padding: 5px 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.playersSection {
+  grid-area: players;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.08);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.playersHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.playerCount {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(0,0,0,0.65);
+}
+
+.viewToggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 999px;
+  background: #eef1f4;
+  gap: 4px;
+}
+
+.viewToggleBtn {
+  border: none;
+  background: transparent;
+  color: #4a5560;
+  min-width: 38px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewToggleBtn.is-active {
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+}
+
+.playersGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  padding: 6px 10px 10px 6px;
+  box-sizing: border-box;
+}
+
+.playersGrid.tableMode {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.playersGrid.tableMode .tile {
+  grid-template-columns: minmax(180px, 1.65fr) minmax(64px, 72px) repeat(3, minmax(68px, 0.52fr));
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.playersGrid.tableMode .tile[draggable="true"] {
+  cursor: grab;
+}
+
+.playersGrid.tableMode .tile.dragging {
+  opacity: 0.45;
+}
+
+.playersGrid.tableMode .tile.dragTargetTop::before,
+.playersGrid.tableMode .tile.dragTargetBottom::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 4px;
+  border-radius: 999px;
+  background: #2f80ed;
+}
+
+.playersGrid.tableMode .tile.dragTargetTop::before {
+  top: -10px;
+}
+
+.playersGrid.tableMode .tile.dragTargetBottom::after {
+  bottom: -10px;
+}
+
+.playersGrid.tableMode .row2,
+.playersGrid.tableMode .row3,
+.playersGrid.tableMode .row4 {
+  margin-top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.playersGrid.tableMode .countsInline,
+.playersGrid.tableMode .countPair {
+  display: contents;
+}
+
+.playersGrid.tableMode .label {
+  width: auto;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.playersGrid.tableMode .label-correct {
+  color: var(--judge-correct);
+}
+
+.playersGrid.tableMode .label-wrong {
+  color: var(--judge-wrong);
+}
+
+.playersGrid.tableMode .label-rest {
+  color: #10a651;
+}
+
+.playersGrid.tableMode .countEdit {
+  justify-content: flex-start;
+  gap: 0;
+}
+
+.playersGrid.tableMode .countBtn {
+  display: none;
+}
+
+.playersGrid.tableMode .countInput {
+  width: 54px;
+  padding: 3px 2px;
+}
+
+.playersGrid.tableMode .name {
+  font-size: 18px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.playersGrid.tableMode .score {
+  font-size: 20px;
+  justify-self: end;
+  text-align: right;
+  min-width: 0;
+  padding-right: 12px;
+  border-right: 1px solid rgba(0,0,0,0.12);
+  margin-right: 4px;
+}
+
+.playersGrid.tableMode .nameRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.playersGrid.tableMode .nameRow .right {
+  display: none;
 }
 
 /* 左上アイコン */
 #topLeftTools {
-  top: 8px;
-  left: 8px;
   display: flex;
+  flex-direction: row;
   gap: 8px;
-
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .iconBtn {
   width: 40px;
   height: 40px;
   font-size: 15px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
   border: none;
   cursor: pointer;
   background: #222;
   color: #fff;
+  padding: 0;
+}
+
+.iconBtnDanger {
+  background: #c62828;
+}
+
+.iconBtnDanger:hover {
+  background: #b71c1c;
+}
+
+.topToolsSpacer {
+  margin-left: auto;
 }
 
 .iconBtn:hover {
   background: #333;
 }
+
 
 /* オーバレイ全体 */
 #overlay {
@@ -283,31 +806,71 @@ button.danger:active {
   margin-top: 0;
 }
 
+.overlayPanel .row {
+  margin: 10px 0;
+}
+
+.modalSection + .modalSection {
+  margin-top: 18px;
+}
+
+.modalSectionTitle {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+  color: rgba(255,255,255,0.92);
+}
+
+.modalSectionBody {
+  display: grid;
+  gap: 8px;
+}
+
+.modalSubsection {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.12);
+}
+
+.modalSubsectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.72);
+  margin-bottom: 6px;
+}
+
+.layoutHint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+}
+
+#visualSettingsPanel .viewToggle {
+  background: rgba(255,255,255,0.12);
+}
+
+#visualSettingsPanel .viewToggleBtn {
+  color: rgba(255,255,255,0.7);
+}
+
+#visualSettingsPanel .viewToggleBtn.is-active {
+  color: #111;
+}
+
 
 /* 右パネル */
 .modPanel{
-  width: 420px;
-  flex: 0 0 420px;
-  border-left: 1px solid rgba(0,0,0,0.1);
-  background: rgba(0,0,0,0.03);
+  grid-area: mod;
+  min-width: 0;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.92);
   overflow: hidden;
-}
-
-.modPanelHeader{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(0,0,0,0.1);
-  background: rgba(255,255,255,0.8);
-}
-
-.modTitle{
-  font-weight: 700;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.08);
 }
 
 .modPanelBody{
-  height: calc(100vh - 48px);
+  height: 100%;
   overflow: hidden;
 }
 
@@ -318,4 +881,34 @@ button.danger:active {
   border: 0;
   display: block;
   background: transparent;
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "leftTop"
+      "mod"
+      "players";
+  }
+
+  .playersSection,
+  .mainTop,
+  .modPanel {
+    min-height: 240px;
+  }
+
+  .controlStrip {
+    flex-direction: column;
+  }
+
+  .leftTopPane {
+    flex-direction: column;
+  }
+
+  #topLeftTools {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }

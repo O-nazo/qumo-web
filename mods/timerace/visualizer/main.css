@@ -1,0 +1,89 @@
+@font-face {
+  font-family: "DSEG7Classic";
+  src: url("/assets/font/DSEG7Classic-BoldItalic.woff") format("woff");
+  font-style: italic;
+  font-weight: 700;
+}
+
+:root {
+  --bg: #040404;
+  --red: #ff3b30;
+  --red-soft: rgba(255, 59, 48, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at center, rgba(255, 0, 0, 0.08), transparent 42%),
+    #020202;
+  color: var(--red);
+}
+
+body {
+  font-family: "DSEG7Classic", monospace;
+}
+
+.stage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 4vh 4vw;
+}
+
+.hud {
+  width: min(1200px, 100%);
+  min-height: min(70vh, 760px);
+  border-radius: 28px;
+  border: 1px solid rgba(255, 59, 48, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0)),
+    rgba(0, 0, 0, 0.82);
+  box-shadow:
+    inset 0 0 80px rgba(255, 59, 48, 0.04),
+    0 0 60px rgba(255, 59, 48, 0.08);
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: clamp(16px, 3vh, 28px);
+  padding: clamp(28px, 5vw, 60px);
+}
+
+.phase {
+  font-size: clamp(20px, 3vw, 40px);
+  letter-spacing: 0.22em;
+  color: rgba(255, 59, 48, 0.78);
+  text-shadow: 0 0 16px var(--red-soft);
+}
+
+.timer {
+  font-size: clamp(72px, 15vw, 210px);
+  line-height: 0.95;
+  letter-spacing: 0.08em;
+  text-shadow:
+    0 0 12px rgba(255, 59, 48, 0.38),
+    0 0 36px rgba(255, 59, 48, 0.24);
+}
+
+.metaRow {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.metaLabel {
+  font-size: clamp(18px, 2.3vw, 28px);
+  letter-spacing: 0.32em;
+  color: rgba(255, 59, 48, 0.65);
+}
+
+.remaining {
+  font-size: clamp(54px, 8vw, 108px);
+  line-height: 1;
+  text-shadow: 0 0 16px rgba(255, 59, 48, 0.22);
+}

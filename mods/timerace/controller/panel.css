@@ -1,0 +1,122 @@
+:root {
+  --bg: #101114;
+  --card: #17191f;
+  --edge: rgba(255, 255, 255, 0.08);
+  --text: #f5f7fb;
+  --muted: #98a0b3;
+  --accent: #e14d4d;
+  --accent-strong: #ff6d6d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #191c25 0%, #0d0f14 70%);
+  color: var(--text);
+}
+
+.wrap {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+.hero {
+  text-align: center;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.phaseText {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.clock {
+  margin-top: 12px;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(36px, 8vw, 64px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.summary {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.controls {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: #0f1117;
+  color: var(--text);
+  font-size: 18px;
+}
+
+.buttonRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+button {
+  min-height: 48px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: #262a35;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.primary {
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  color: #160707;
+}
+
+button.danger {
+  background: #2b1114;
+  color: #ffd6d6;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
