@@ -16,10 +16,19 @@
     </section>
 
     <section class="card controls">
-      <label class="field">
-        <span>タイマー時間（秒）</span>
-        <input id="durationSec" type="number" min="5" max="3599" step="1" value="60" />
-      </label>
+      <div class="field">
+        <span>タイマー時間</span>
+        <div class="timeInputs">
+          <label class="timeField">
+            <span>分</span>
+            <input id="durationMin" type="number" min="0" max="59" step="1" value="1" />
+          </label>
+          <label class="timeField">
+            <span>秒</span>
+            <input id="durationSec" type="number" min="0" max="59" step="1" value="0" />
+          </label>
+        </div>
+      </div>
 
       <div class="buttonRow">
         <button id="btnStart" class="primary">スタート</button>

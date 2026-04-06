@@ -418,6 +418,7 @@ nameEl.textContent = myName || "-";
 client.onState((st) => {
   // まだJOINしてない場合でもSTATEは来るのでUIは更新する
   const my = (myPlayerId && st.players) ? st.players[myPlayerId] : null;
+  const scoreHidden = st.scoreHiddenVisible === true;
   if (my?.name) {
     myName = my.name;
     writeSavedName(myName);
@@ -426,9 +427,9 @@ client.onState((st) => {
   }
 
   const score = Number(my?.score ?? 0);
-  scoreEl.textContent = String(score);
+  scoreEl.textContent = scoreHidden ? "?" : String(score);
 
-  wrongCountEl.textContent = String(my?.wrongCount ?? 0);
+  wrongCountEl.textContent = scoreHidden ? "?" : String(my?.wrongCount ?? 0);
   wrongCountEl.parentElement.style.display =
     st.ui?.showWrongCount !== false ? "" : "none";
 
@@ -521,7 +522,7 @@ client.onState((st) => {
       rankEl.textContent = "-";
     } else {
       const rank = idx + 1;
-      rankEl.textContent = ordinalShort(rank);
+      rankEl.textContent = scoreHidden ? "?" : ordinalShort(rank);
     }
   }
 
@@ -529,6 +530,7 @@ client.onState((st) => {
   if (pointRankEl) {
     const pr = computePointsRankFromPlayers(st.players, myPlayerId, st.ui?.playerOrder || []);
     pointRankEl.textContent =
+      scoreHidden ? "?" :
       pr.rank == null ? "-" :
       pr.tied ? `T${ordinalShort(pr.rank)} / ${pr.total}` :
       `${ordinalShort(pr.rank)} / ${pr.total}`;

@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const modId = "visual_quiz";
+const VISUAL_QUIZ_THINKING_LOOP_SECONDS = 60 * 60 * 24;
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
 
 // __dirname 相当（ESMでは自前で作る）
 const __filename = fileURLToPath(import.meta.url);
@@ -23,6 +25,8 @@ export default function registerVisualQuiz(ctx) {
    * state
    * ------------------- */
   const st = {
+    sets: [],
+    setId: null,
     questions: [],
     qIndex: 0,
     selectedQIndex: 0,
@@ -32,9 +36,26 @@ export default function registerVisualQuiz(ctx) {
     showAnswer: false,
     showQuestionText: true,
     thinking: false,        // ★追加：シンキングBGMのON/OFF
+    rewindNonce: 0,
+    mediaControlNonce: 0,
+    mediaControlAction: null,
+    mediaSeekTimeSec: 0,
+    mediaPlayback: {
+      isVideo: false,
+      paused: true,
+      currentTime: 0,
+      duration: 0,
+      mediaKey: ""
+    },
+    instantCloseNonce: 0,
 
     lastBuzzPlayerId: null
   };
+  const qRootDir = path.join(assetsDir, "q");
+  let reloadTimer = null;
+  let rootWatcher = null;
+  let activeSetDirWatcher = null;
+  let activeImagesDirWatcher = null;
 
   /** --------------------
    * utils
@@ -128,37 +149,97 @@ export default function registerVisualQuiz(ctx) {
     return String(Math.trunc(n));
   }
 
-  function loadQuestionImageMap() {
-    const imagesDir = path.join(__dirname, "../assets/q/images");
-    const imageMap = new Map();
+  function normalizeSetId(value) {
+    const raw = String(value ?? "").trim();
+    return /^\d+$/.test(raw) ? String(Number.parseInt(raw, 10)) : null;
+  }
+
+  function getMediaKindByExt(ext) {
+    return VIDEO_EXTENSIONS.has(String(ext || "").toLowerCase()) ? "video" : "image";
+  }
+
+  function parseMediaKey(name) {
+    const match = String(name || "").trim().match(/^(\d+)(A)?$/i);
+    if (!match) return null;
+    return {
+      no: String(Number.parseInt(match[1], 10)),
+      isAnswer: !!match[2]
+    };
+  }
+
+  function getSetMediaUrl(setId, fileName) {
+    return `${base}/q/${encodeURIComponent(String(setId))}/images/${encodeURIComponent(String(fileName))}`;
+  }
+
+  function listQuestionSets() {
+    if (!fs.existsSync(qRootDir)) return [];
+    const entries = fs.readdirSync(qRootDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const setId = normalizeSetId(entry.name);
+        if (!setId) return null;
+        const setDir = path.join(qRootDir, entry.name);
+        const csvPath = path.join(setDir, "questions.csv");
+        if (!fs.existsSync(csvPath)) return null;
+        return {
+          id: setId,
+          label: setId,
+          dir: setDir
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => Number(a.id) - Number(b.id));
+  }
+
+  function loadQuestionMediaMaps(setId) {
+    const imagesDir = path.join(qRootDir, String(setId), "images");
+    const promptMediaMap = new Map();
+    const answerMediaMap = new Map();
+    if (!fs.existsSync(imagesDir)) {
+      return { promptMediaMap, answerMediaMap };
+    }
     const entries = fs.readdirSync(imagesDir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
 
       const parsed = path.parse(entry.name);
-      const normalized = normalizeNo(parsed.name);
-      if (normalized == null) continue;
+      const mediaKey = parseMediaKey(parsed.name);
+      if (!mediaKey) continue;
 
-      if (!imageMap.has(normalized)) {
-        imageMap.set(normalized, entry.name);
+      const media = {
+        file: entry.name,
+        kind: getMediaKindByExt(parsed.ext),
+        url: getSetMediaUrl(setId, entry.name)
+      };
+
+      if (mediaKey.isAnswer) {
+        if (!answerMediaMap.has(mediaKey.no)) {
+          answerMediaMap.set(mediaKey.no, media);
+        }
+      } else if (!promptMediaMap.has(mediaKey.no)) {
+        promptMediaMap.set(mediaKey.no, media);
       }
     }
 
-    return imageMap;
+    return { promptMediaMap, answerMediaMap };
   }
 
-  function loadQuestions() {
+  function loadQuestionsForSet(setId) {
     try {
-      const p = path.join(
-        __dirname,
-        "../assets/q/questions.csv"
-      );
+      if (!setId) {
+        st.questions = [];
+        st.qIndex = null;
+        st.selectedQIndex = null;
+        return;
+      }
+      const p = path.join(qRootDir, String(setId), "questions.csv");
       const csvText = fs.readFileSync(p, "utf-8");
       const rows = parseCsv(csvText);
       const [header = [], ...dataRows] = rows;
       const columns = header.map((col) => String(col || "").trim());
-      const imageMap = loadQuestionImageMap();
+      const { promptMediaMap, answerMediaMap } = loadQuestionMediaMaps(setId);
 
       st.questions = dataRows
         .filter((cols) => cols.some((value) => String(value || "").trim() !== ""))
@@ -167,41 +248,123 @@ export default function registerVisualQuiz(ctx) {
             columns.map((key, idx) => [key, String(cols[idx] ?? "").trim()])
           );
           const normalizedNo = normalizeNo(raw.no);
+          const promptMedia = normalizedNo == null ? null : (promptMediaMap.get(normalizedNo) || null);
+          const answerMedia = normalizedNo == null ? null : (answerMediaMap.get(normalizedNo) || null);
 
           return {
             no: Number(raw.no || 0),
             question: raw.question || "",
             answer: raw.answer || "",
-            file: normalizedNo == null ? "" : (imageMap.get(normalizedNo) || "")
+            file: promptMedia?.file || "",
+            mediaKind: promptMedia?.kind || "image",
+            promptMedia,
+            answerMedia,
+            setId: String(setId)
           };
         });
-      st.qIndex = 0;
+      st.qIndex = st.questions.length > 0 ? 0 : null;
       st.selectedQIndex = st.questions.length > 0 ? 0 : null;
-      console.log("[visual_quiz] questions loaded:", st.questions.length);
+      console.log("[visual_quiz] questions loaded:", setId, st.questions.length);
     } catch (e) {
-      console.error("[visual_quiz] failed to load questions", e);
+      console.error("[visual_quiz] failed to load questions", setId, e);
       st.questions = [];
+      st.qIndex = null;
+      st.selectedQIndex = null;
     }
+  }
+
+  function refreshQuestionSets({ preserveSelection = true } = {}) {
+    const previousSetId = preserveSelection ? st.setId : null;
+    const sets = listQuestionSets();
+    st.sets = sets.map(({ id, label }) => ({ id, label }));
+    const nextSetId = sets.some((set) => set.id === previousSetId)
+      ? previousSetId
+      : (sets[0]?.id ?? null);
+
+    if (nextSetId !== st.setId) {
+      st.setId = nextSetId;
+      loadQuestionsForSet(nextSetId);
+      resetForPresent();
+    } else if (nextSetId) {
+      const previousQuestionNo =
+        typeof st.selectedQIndex === "number" ? st.questions[st.selectedQIndex]?.no : null;
+      loadQuestionsForSet(nextSetId);
+      if (previousQuestionNo != null) {
+        const nextIndex = st.questions.findIndex((q) => Number(q.no) === Number(previousQuestionNo));
+        if (nextIndex >= 0) {
+          st.qIndex = nextIndex;
+          st.selectedQIndex = nextIndex;
+        }
+      }
+    } else {
+      st.questions = [];
+      st.qIndex = null;
+      st.selectedQIndex = null;
+    }
+  }
+
+  function closeWatcher(watcher) {
+    if (!watcher) return null;
+    try {
+      watcher.close();
+    } catch {}
+    return null;
+  }
+
+  function scheduleRefreshAndEmit() {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      refreshQuestionSets({ preserveSelection: true });
+      emitState();
+      watchActiveSet();
+    }, 120);
+  }
+
+  function watchDir(dirPath, onChange) {
+    if (!dirPath || !fs.existsSync(dirPath)) return null;
+    try {
+      return fs.watch(dirPath, { persistent: false }, onChange);
+    } catch (e) {
+      console.warn("[visual_quiz] watch failed:", dirPath, e);
+      return null;
+    }
+  }
+
+  function watchActiveSet() {
+    activeSetDirWatcher = closeWatcher(activeSetDirWatcher);
+    activeImagesDirWatcher = closeWatcher(activeImagesDirWatcher);
+    if (!st.setId) return;
+
+    const setDir = path.join(qRootDir, String(st.setId));
+    const imagesDir = path.join(setDir, "images");
+    activeSetDirWatcher = watchDir(setDir, scheduleRefreshAndEmit);
+    activeImagesDirWatcher = watchDir(imagesDir, scheduleRefreshAndEmit);
   }
 
   /** --------------------
    * init
    * ------------------- */
-  loadQuestions();
+  refreshQuestionSets({ preserveSelection: false });
+  rootWatcher = watchDir(qRootDir, scheduleRefreshAndEmit);
+  watchActiveSet();
   emitState();
 
   ctx.on("CLIENT_CONNECTED", emitState);
   ctx.on("MOD_ACTIVATED", emitState);
+  ctx.on("VQ_SYNC_STATE", emitState);
 
   function resetForPresent() {
-    st.qIndex = null;
+    const keepSelectedQIndex =
+      typeof st.qIndex === "number" ? st.qIndex : st.selectedQIndex;
+    st.qIndex = typeof keepSelectedQIndex === "number" ? keepSelectedQIndex : null;
     st.phase = "LOADED";
     st.lidOpen = false;
     st.showAnswer = false;
-    st.showQuestionText = false;
+    st.showQuestionText = true;
     st.thinking = false;
+    st.rewindNonce = 0;
     st.lastBuzzPlayerId = null;
-    st.selectedQIndex = null;
+    st.selectedQIndex = typeof keepSelectedQIndex === "number" ? keepSelectedQIndex : null;
   }
 
   /** --------------------
@@ -212,19 +375,33 @@ export default function registerVisualQuiz(ctx) {
     emitState();
   });
 
+  ctx.on("VQ_SELECT_SET", (cmd) => {
+    const nextSetId = normalizeSetId(cmd?.setId);
+    if (!nextSetId) return;
+    if (!st.sets.some((set) => set.id === nextSetId)) return;
+    if (nextSetId === st.setId) return;
+    st.setId = nextSetId;
+    loadQuestionsForSet(nextSetId);
+    resetForPresent();
+    watchActiveSet();
+    emitState();
+  });
+
   ctx.on("VQ_START", () => {
     // 初回 or 誤答後にもう一度見せたい時を許可
     if (st.phase !== "LOADED" && st.phase !== "BUZZED") return;
     if (typeof st.qIndex !== "number" || !st.questions[st.qIndex]) return;
 
-    ctx.coreSfx("thinking", {
-      durationSec: Number(ctx.getState()?.rules?.thinkingSeconds ?? 999999)
-    });
+    if (st.questions[st.qIndex]?.promptMedia?.kind !== "video") {
+      ctx.coreSfx("thinking", {
+        durationSec: VISUAL_QUIZ_THINKING_LOOP_SECONDS
+      });
+    }
     st.phase = "REVEALED";
     st.lidOpen = true;
     st.showAnswer = false;
     st.showQuestionText = true;
-    st.thinking = true;
+    st.thinking = st.questions[st.qIndex]?.promptMedia?.kind !== "video";
     st.lastBuzzPlayerId = null;
     emitState();
   });
@@ -246,8 +423,43 @@ export default function registerVisualQuiz(ctx) {
     emitState();
   });
 
+  ctx.on("VQ_REWIND", () => {
+    st.rewindNonce = Number(st.rewindNonce ?? 0) + 1;
+    emitState();
+  });
+
+  ctx.on("VQ_MEDIA_PLAY", () => {
+    st.mediaControlNonce = Number(st.mediaControlNonce ?? 0) + 1;
+    st.mediaControlAction = "play";
+    emitState();
+  });
+
+  ctx.on("VQ_MEDIA_PAUSE", () => {
+    st.mediaControlNonce = Number(st.mediaControlNonce ?? 0) + 1;
+    st.mediaControlAction = "pause";
+    emitState();
+  });
+
+  ctx.on("VQ_MEDIA_TOGGLE", () => {
+    st.mediaControlNonce = Number(st.mediaControlNonce ?? 0) + 1;
+    st.mediaControlAction = "toggle";
+    emitState();
+  });
+
+  ctx.on("VQ_MEDIA_SEEK", (cmd) => {
+    const timeSec = Number(cmd?.timeSec);
+    if (!Number.isFinite(timeSec)) return;
+    st.mediaControlNonce = Number(st.mediaControlNonce ?? 0) + 1;
+    st.mediaControlAction = "seek";
+    st.mediaSeekTimeSec = Math.max(0, timeSec);
+    emitState();
+  });
+
   ctx.on("VQ_TOGGLE_ANSWER", () => {
     st.showAnswer = !st.showAnswer;
+    if (st.showAnswer) {
+      st.lidOpen = true;
+    }
     emitState();
   });
 
@@ -282,6 +494,7 @@ export default function registerVisualQuiz(ctx) {
     st.showAnswer = false;
     st.showQuestionText = true;
     st.thinking = false;
+    st.instantCloseNonce = Number(st.instantCloseNonce ?? 0) + 1;
     st.lastBuzzPlayerId = null;
     emitState();
   });
@@ -327,12 +540,53 @@ export default function registerVisualQuiz(ctx) {
 
   // スルー：問題終了状態へ
   ctx.on("JUDGE_SKIP", () => {
-    st.phase = "ENDED";
+    st.phase = "BUZZED";
     st.lidOpen = false;
     st.showAnswer = false;
     st.showQuestionText = true;
     st.thinking = false;
+    st.lastBuzzPlayerId = null;
     emitState();
+  });
+
+  ctx.on("DISPATCH", (action) => {
+    if (!action || typeof action.type !== "string") return;
+
+    if (action.type === "VQ_MEDIA_STATUS") {
+      const currentTime = Math.max(0, Number(action.currentTime) || 0);
+      const duration = Math.max(0, Number(action.duration) || 0);
+      const paused = action.paused !== false;
+      const isVideo = action.isVideo === true;
+      const mediaKey = String(action.mediaKey || "");
+      const prev = st.mediaPlayback || {};
+      const timeChanged = Math.abs((Number(prev.currentTime) || 0) - currentTime) >= 0.2;
+      const durationChanged = Math.abs((Number(prev.duration) || 0) - duration) >= 0.2;
+      if (
+        prev.paused !== paused ||
+        prev.isVideo !== isVideo ||
+        prev.mediaKey !== mediaKey ||
+        timeChanged ||
+        durationChanged
+      ) {
+        st.mediaPlayback = {
+          isVideo,
+          paused,
+          currentTime,
+          duration,
+          mediaKey
+        };
+        emitState();
+      }
+      return;
+    }
+
+    if (action.type === "VQ_MEDIA_ENDED") {
+      if (st.phase !== "REVEALED" || st.showAnswer) return;
+      ctx.dispatch?.({
+        type: "CORE_COMMAND",
+        command: "JUDGE_SKIP"
+      });
+    }
   });
 
 

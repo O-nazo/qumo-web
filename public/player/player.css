@@ -32,7 +32,7 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    url("/logo/Logo_ver.png") center center / min(50vw, 520px) auto no-repeat;
+    url("/logo/Logo_ver.png") center center / min(80vw, 860px) auto no-repeat;
   opacity: 0.15;
   pointer-events: none;
   z-index: -1;

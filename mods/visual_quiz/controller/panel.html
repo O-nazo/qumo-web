@@ -8,25 +8,18 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="toolbarRow">
-      <div class="toolbarGroup">
-        <button id="btnPresentCore">出題</button>
-        <button id="btnSkip">スルー</button>
-      </div>
-      <div class="toolbarGroup toolbarGroupRight">
-        <button id="btnAnswer">解答表示</button>
-      </div>
-    </div>
-
     <div class="toolbarRow toolbarRowLarge">
-      <div class="toolbarGroup">
-        <button id="btnStart">START</button>
-        <button id="btnCorrectCore" class="danger">正解</button>
-        <button id="btnWrongCore" class="primary">誤答</button>
-      </div>
       <div class="toolbarGroup toolbarGroupRight">
+        <select id="setSelect" title="問題セット"></select>
+        <button id="btnStart">START</button>
+        <button id="btnMediaToggle" title="再生 / 一時停止">▶️</button>
+        <div class="seekWrap">
+          <input id="seekBar" type="range" min="0" max="1000" value="0" step="1" aria-label="シークバー" />
+          <div id="seekTime" class="seekTime">0:00 / 0:00</div>
+        </div>
         <button id="btnOpen">開</button>
         <button id="btnClose">閉</button>
+        <button id="btnAnswer">解答表示</button>
       </div>
     </div>
 
@@ -36,6 +29,7 @@
         <div class="preview">
           <div class="thumbWrap">
             <img id="previewImg" alt="" />
+            <video id="previewVideo" playsinline preload="metadata" hidden></video>
           </div>
           <div class="meta">
             <div id="previewQ" class="q"></div>

@@ -33,6 +33,7 @@ function createDefaultControllerPrefs() {
       playerTileLayout: "grid",
       prioritizePressedPlayers: false,
       swapJudgeColors: false,
+      playerTileDarkTheme: false,
       showVerticalScore: true,
       showVerticalCorrectCount: true,
       showVerticalWrongCount: true,
@@ -91,6 +92,7 @@ function sanitizePersistedPrefs(raw) {
       playerTileLayout: typeof ui.playerTileLayout === "string" ? ui.playerTileLayout : defaults.ui.playerTileLayout,
       prioritizePressedPlayers: typeof ui.prioritizePressedPlayers === "boolean" ? ui.prioritizePressedPlayers : defaults.ui.prioritizePressedPlayers,
       swapJudgeColors: typeof ui.swapJudgeColors === "boolean" ? ui.swapJudgeColors : defaults.ui.swapJudgeColors,
+      playerTileDarkTheme: typeof ui.playerTileDarkTheme === "boolean" ? ui.playerTileDarkTheme : defaults.ui.playerTileDarkTheme,
       showVerticalScore: typeof ui.showVerticalScore === "boolean" ? ui.showVerticalScore : defaults.ui.showVerticalScore,
       showVerticalCorrectCount: typeof ui.showVerticalCorrectCount === "boolean" ? ui.showVerticalCorrectCount : defaults.ui.showVerticalCorrectCount,
       showVerticalWrongCount: typeof ui.showVerticalWrongCount === "boolean" ? ui.showVerticalWrongCount : defaults.ui.showVerticalWrongCount,
@@ -122,7 +124,11 @@ function createInitialState() {
   const persisted = sanitizePersistedPrefs(loadPersistedPrefs());
   return {
     phase: "lobby",
-    questionNo: 1,
+    questionNo: 0,
+    titleScreenVisible: false,
+    titleScreenAutoShown: false,
+    modScoreboardVisible: false,
+    scoreHiddenVisible: false,
     joinUrls: [],
 
     rules: {
@@ -154,6 +160,8 @@ function createInitialState() {
     ui: {
       ...defaults.ui,
       playerOrder: [],
+      rankSortOrder: [],
+      hiddenScoreRankSortOrder: [],
       joinQrTargetUrl: null,
       joinQrDataUrl: null,
       ...persisted.ui

@@ -74,11 +74,128 @@ function emitMod(name, payload) {
   getModRuntime()?.emit?.(active, name, payload);
 }
 
+function clearModScoreboardVisible(st) {
+  if (!st) return false;
+  if (st.modScoreboardVisible !== true) return false;
+  st.modScoreboardVisible = false;
+  return true;
+}
+
 
 function clampInt(n, min, max, fallback = 0) {
   const x = Number(n);
   if (!Number.isFinite(x)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(x)));
+}
+
+function normalizePlayerIdForSort(id) {
+  const raw = String(id ?? "");
+  const num = Number.parseInt(raw, 10);
+  if (Number.isFinite(num) && String(num) === raw) {
+    return { numeric: true, value: num, raw };
+  }
+  return { numeric: false, value: raw, raw };
+}
+
+function buildConnectionOrderMapForRankSort(st) {
+  const players = Object.values(st.players || {}).filter((p) => p?.connected !== false);
+  const sortedById = [...players].sort((a, b) => {
+    const aKey = normalizePlayerIdForSort(a?.id);
+    const bKey = normalizePlayerIdForSort(b?.id);
+    if (aKey.numeric && bKey.numeric && aKey.value !== bKey.value) {
+      return aKey.value - bKey.value;
+    }
+    if (aKey.numeric !== bKey.numeric) {
+      return aKey.numeric ? -1 : 1;
+    }
+    return String(aKey.raw).localeCompare(String(bKey.raw), "ja");
+  });
+
+  const orderMap = new Map();
+  sortedById.forEach((p, idx) => orderMap.set(p.id, idx));
+  return orderMap;
+}
+
+function getRankGroupForSort(p) {
+  const status = String(p?.status || "active");
+  if (status === "qualified") return 0;
+  if (status === "disqualified") return 2;
+  return 1;
+}
+
+function compareRankOrderForSort(a, b, connectionOrderMap = new Map()) {
+  const groupDiff = getRankGroupForSort(a) - getRankGroupForSort(b);
+  if (groupDiff !== 0) return groupDiff;
+
+  const group = getRankGroupForSort(a);
+  if (group === 0) {
+    const aPass = Number(a?.passRank ?? Number.MAX_SAFE_INTEGER);
+    const bPass = Number(b?.passRank ?? Number.MAX_SAFE_INTEGER);
+    if (aPass !== bPass) return aPass - bPass;
+    const aAt = Number(a?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    const bAt = Number(b?.qualifiedAt ?? Number.MAX_SAFE_INTEGER);
+    return aAt - bAt;
+  }
+
+  if (group === 1) {
+    const scoreDiff = Number(b?.score ?? 0) - Number(a?.score ?? 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+    if (wrongDiff !== 0) return wrongDiff;
+    return (connectionOrderMap.get(a?.id) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?.id) ?? Number.MAX_SAFE_INTEGER);
+  }
+
+  const wrongDiff = Number(a?.wrongCount ?? 0) - Number(b?.wrongCount ?? 0);
+  if (wrongDiff !== 0) return wrongDiff;
+  const connectionDiff = (connectionOrderMap.get(a?.id) ?? Number.MAX_SAFE_INTEGER) - (connectionOrderMap.get(b?.id) ?? Number.MAX_SAFE_INTEGER);
+  if (connectionDiff !== 0) return connectionDiff;
+  const dqAtDiff = Number(a?.dqAt ?? Number.MAX_SAFE_INTEGER) - Number(b?.dqAt ?? Number.MAX_SAFE_INTEGER);
+  if (dqAtDiff !== 0) return dqAtDiff;
+  return String(a?.name || "").localeCompare(String(b?.name || ""), "ja");
+}
+
+function updateRankSortOrderSnapshot(st) {
+  st.ui = st.ui || {};
+  const connectionOrderMap = buildConnectionOrderMapForRankSort(st);
+  const players = Object.values(st.players || {}).filter((p) => p?.connected !== false);
+  st.ui.rankSortOrder = players
+    .sort((a, b) => compareRankOrderForSort(a, b, connectionOrderMap))
+    .map((p) => p.id);
+}
+
+function buildSnapshotSortedPlayers(st, snapshot = []) {
+  const connectionOrderMap = buildConnectionOrderMapForRankSort(st);
+  const players = Object.values(st.players || {}).filter((p) => p?.connected !== false);
+  if (!Array.isArray(snapshot) || snapshot.length === 0) {
+    return [...players].sort((a, b) => compareRankOrderForSort(a, b, connectionOrderMap));
+  }
+
+  const playersById = new Map(players.map((p) => [p.id, p]));
+  const ordered = [];
+  const seen = new Set();
+  for (const id of snapshot) {
+    const player = playersById.get(String(id || ""));
+    if (!player || seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  for (const player of players) {
+    if (seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  return ordered;
+}
+
+function updateHiddenScoreRankSortOrderSnapshot(st) {
+  st.ui = st.ui || {};
+  const visualizerSortMode = String(st.ui.visualizerSortMode || "manual");
+  if (visualizerSortMode !== "rank") {
+    st.ui.hiddenScoreRankSortOrder = [];
+    return;
+  }
+  const baseSnapshot = Array.isArray(st.ui.rankSortOrder) ? st.ui.rankSortOrder : [];
+  st.ui.hiddenScoreRankSortOrder = buildSnapshotSortedPlayers(st, baseSnapshot).map((p) => p.id);
 }
 
 function recomputeScores(st) {
@@ -431,9 +548,11 @@ function createWsServer(httpServer) {
     if (st.ui.controllerSortMode == null) st.ui.controllerSortMode = "manual";
     if (st.ui.visualizerSortMode == null) st.ui.visualizerSortMode = "manual";
     if (!Array.isArray(st.ui.playerOrder)) st.ui.playerOrder = [];
+    if (!Array.isArray(st.ui.rankSortOrder)) st.ui.rankSortOrder = [];
     if (st.ui.playerTileLayout == null) st.ui.playerTileLayout = "grid";
     if (st.ui.prioritizePressedPlayers == null) st.ui.prioritizePressedPlayers = false;
     if (st.ui.swapJudgeColors == null) st.ui.swapJudgeColors = false;
+    if (st.ui.playerTileDarkTheme == null) st.ui.playerTileDarkTheme = false;
     if (st.ui.showVerticalScore == null) st.ui.showVerticalScore = true;
     if (st.ui.showVerticalCorrectCount == null) st.ui.showVerticalCorrectCount = true;
     if (st.ui.showVerticalWrongCount == null) st.ui.showVerticalWrongCount = true;
@@ -446,6 +565,11 @@ function createWsServer(httpServer) {
     if (st.ui.joinQrVisible == null) st.ui.joinQrVisible = false;
     if (st.ui.joinQrTargetUrl == null) st.ui.joinQrTargetUrl = null;
     if (st.ui.joinQrDataUrl == null) st.ui.joinQrDataUrl = null;
+    if (st.titleScreenVisible == null) st.titleScreenVisible = false;
+    if (st.titleScreenAutoShown == null) st.titleScreenAutoShown = false;
+    if (st.modScoreboardVisible == null) st.modScoreboardVisible = false;
+    if (st.scoreHiddenVisible == null) st.scoreHiddenVisible = false;
+    if (!Array.isArray(st.ui.hiddenScoreRankSortOrder)) st.ui.hiddenScoreRankSortOrder = [];
 
     if (st.questionNo == null) st.questionNo = 1;
     updatePresetList(st);
@@ -714,7 +838,9 @@ function createWsServer(httpServer) {
       if (type === C2S.BUZZER_OPEN) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        st.titleScreenVisible = false;
         // 結果表示中なら次問へ、そうでなければ同じ問を受付再開
+        updateRankSortOrderSnapshot(st);
         startQuestion(st, { increment: (st.judge?.status === "result" || st.phase === "result") });
         emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
@@ -724,7 +850,10 @@ function createWsServer(httpServer) {
       if (type === C2S.BUZZER_RESET) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
-        startQuestion(st, { increment: false });
+        st.titleScreenVisible = false;
+        resetBuzzer(st);
+        resetJudge(st);
+        st.phase = "open";
         emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
@@ -733,6 +862,7 @@ function createWsServer(httpServer) {
       if (type === C2S.NEXT_QUESTION) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        st.titleScreenVisible = false;
 
         // 追加: 自動遷移の予約があればキャンセル（手動が優先）
         if (autoNextTimer) {
@@ -740,7 +870,36 @@ function createWsServer(httpServer) {
           autoNextTimer = null;
         }
         emitMod("STATE_UPDATED", { at: Date.now() });
+        updateRankSortOrderSnapshot(st);
         startQuestion(st, { increment: true });
+        broadcastState();
+        return;
+      }
+
+      if (type === "SET_TITLE_SCREEN") {
+        if (ws.meta.screen !== "controller") return;
+        st.titleScreenVisible = !!msg.visible;
+        broadcastState();
+        return;
+      }
+
+      if (type === "SET_MOD_SCOREBOARD_VISIBLE") {
+        if (ws.meta.screen !== "controller") return;
+        st.modScoreboardVisible = !!msg.visible && !!String(st.mods?.active || "").trim();
+        broadcastState();
+        return;
+      }
+
+      if (type === "SET_SCORE_HIDDEN") {
+        if (ws.meta.screen !== "controller") return;
+        const nextVisible = !!msg.visible;
+        if (nextVisible) {
+          updateHiddenScoreRankSortOrderSnapshot(st);
+        } else {
+          st.ui.hiddenScoreRankSortOrder = [];
+          updateRankSortOrderSnapshot(st);
+        }
+        st.scoreHiddenVisible = nextVisible;
         broadcastState();
         return;
       }
@@ -933,6 +1092,7 @@ function createWsServer(httpServer) {
       if (type === C2S.JUDGE_SKIP) {
         if (ws.meta.screen !== "controller") return;
 
+        emitMod("JUDGE_SKIP", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
         emitSfx(st, "skip");
 
         setResult(st, { type: "skip" });
@@ -985,6 +1145,7 @@ function createWsServer(httpServer) {
 
         recomputeScores(st);
         recomputePlayerStatuses(st);
+        updateRankSortOrderSnapshot(st);
         broadcastState();
         return;
       }
@@ -1042,6 +1203,7 @@ function createWsServer(httpServer) {
         st.ui.playerTileLayout = String(msg.playerTileLayout || "grid") === "vertical" ? "vertical" : "grid";
         st.ui.prioritizePressedPlayers = !!msg.prioritizePressedPlayers;
         st.ui.swapJudgeColors = !!msg.swapJudgeColors;
+        st.ui.playerTileDarkTheme = !!msg.playerTileDarkTheme;
         st.ui.showVerticalScore = msg.showVerticalScore !== false;
         st.ui.showVerticalCorrectCount = msg.showVerticalCorrectCount !== false;
         st.ui.showVerticalWrongCount = msg.showVerticalWrongCount !== false;
@@ -1050,6 +1212,16 @@ function createWsServer(httpServer) {
         st.ui.showMarks = !!msg.showMarks;
         st.ui.showMarkCorrect = msg.showMarkCorrect !== false;
         st.ui.showMarkWrong = msg.showMarkWrong !== false;
+
+        if (st.scoreHiddenVisible) {
+          if (st.ui.visualizerSortMode === "rank") {
+            if (!Array.isArray(st.ui.hiddenScoreRankSortOrder) || st.ui.hiddenScoreRankSortOrder.length === 0) {
+              updateHiddenScoreRankSortOrderSnapshot(st);
+            }
+          } else {
+            st.ui.hiddenScoreRankSortOrder = [];
+          }
+        }
 
         persistControllerPrefs(st);
         broadcastState();
@@ -1128,6 +1300,8 @@ function createWsServer(httpServer) {
           p.pendingRestAdd = 0;
         }
         recomputeScores(st);
+        emitMod("AC_RESET", { by: ws.meta?.screen ?? "controller", at: Date.now() });
+        st.titleScreenVisible = false;
 
         // 問題中の判定も安全側でリセット（おすすめ）
         resetBuzzer(st);
@@ -1254,6 +1428,7 @@ function createWsServer(httpServer) {
             getModRuntime()?.emit?.(prevActive, "MOD_DEACTIVATED", {});
           }
           st.mods.active = null;
+          st.modScoreboardVisible = false;
           broadcastState();
           broadcastToScreens(["controller", "visualizer"], { type: S2C.RELOAD });
           return;
@@ -1270,6 +1445,11 @@ function createWsServer(httpServer) {
         }
 
         st.mods.active = modIdRaw;
+        st.modScoreboardVisible = false;
+        if (!st.titleScreenAutoShown) {
+          st.titleScreenVisible = true;
+          st.titleScreenAutoShown = true;
+        }
         const active = String(getState()?.mods?.active || "");
         if (active) {
           getModRuntime()?.emit?.(active, "MOD_ACTIVATED", {});
@@ -1289,8 +1469,10 @@ function createWsServer(httpServer) {
         const active = String(getState()?.mods?.active || "");
         if (!active || modId !== active) return; // ←ガード
 
+        const stateChanged = clearModScoreboardVisible(st);
         const rt = getModRuntime();
         rt?.emit?.(modId, cmd.type, cmd);
+        if (stateChanged) broadcastState();
         return;
       }
 
@@ -1303,10 +1485,29 @@ function createWsServer(httpServer) {
         const modId = String(st?.mods?.active || "");
         if (!modId) return;
 
+        const shouldKeepScoreboard =
+          action.type === "VQ_MEDIA_STATUS";
+        const stateChanged = shouldKeepScoreboard ? false : clearModScoreboardVisible(st);
+
+        if (action.type === "CORE_COMMAND") {
+          const command = String(action.command || "").trim();
+          if (command === "JUDGE_SKIP") {
+            emitMod("JUDGE_SKIP", { by: "mod_dispatch", at: Date.now() });
+            emitSfx(st, "skip");
+            setResult(st, { type: "skip" });
+            broadcastState();
+            scheduleNextQuestion();
+          } else if (stateChanged) {
+            broadcastState();
+          }
+          return;
+        }
+
         const rt = getModRuntime();
         if (rt?.emit) {
           rt.emit(modId, "DISPATCH", action);
         }
+        if (stateChanged) broadcastState();
         return;
       }
 

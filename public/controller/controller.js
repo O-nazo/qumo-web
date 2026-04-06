@@ -7,6 +7,7 @@ const rulesPanel = document.getElementById("rulesPanel");
 const settingsPanel = document.getElementById("settingsPanel");
 const visualSettingsPanel = document.getElementById("visualSettingsPanel");
 const modsSettingPanel = document.getElementById("modsSettingPanel");
+const helpPanel = document.getElementById("helpPanel");
 
 // --- MOD panel loader ---
 const modPanel = document.getElementById("modPanel");
@@ -15,6 +16,9 @@ const modPanelBody = document.getElementById("modPanelBody");
 const modSelect = document.getElementById("modSelect");
 const modApply = document.getElementById("modApply");
 const toggleJoinQrTop = document.getElementById("toggleJoinQrTop");
+const toggleModScoreboardBtn = document.getElementById("toggleModScoreboard");
+const toggleScoreHiddenBtn = document.getElementById("toggleScoreHidden");
+const toggleTitleScreenBtn = document.getElementById("toggleTitleScreen");
 const playerCountEl = document.getElementById("playerCount");
 const playersGridEl = document.getElementById("playersGrid");
 const playersViewGridBtn = document.getElementById("playersViewGrid");
@@ -212,6 +216,7 @@ const els = {
   showVerticalRestCount: document.querySelector("#showVerticalRestCount"),
   showVerticalBuzzOrder: document.querySelector("#showVerticalBuzzOrder"),
   swapJudgeColors: document.querySelector("#swapJudgeColors"),
+  playerTileDarkTheme: document.querySelector("#playerTileDarkTheme"),
   showMarks: document.querySelector("#showMarks"),
   showMarkCorrect: document.querySelector("#showMarkCorrect"),
   showMarkWrong: document.querySelector("#showMarkWrong"),
@@ -278,6 +283,40 @@ function handleWrong() {
   else client.emit("PLAY_SFX", { key: "wrong" });
 }
 
+function handleReset() {
+  client.emit("BUZZER_RESET");
+  client.emit("PLAY_SFX", { key: "__stop__" });
+  syncVisualQuizPresentIfActive();
+}
+
+function toggleTitleScreen() {
+  const nextVisible = !(lastState?.titleScreenVisible === true);
+  client.emit("SET_TITLE_SCREEN", { visible: nextVisible });
+}
+
+function toggleModScoreboard() {
+  if (!getActiveModId()) return;
+  const nextVisible = !(lastState?.modScoreboardVisible === true);
+  client.emit("SET_MOD_SCOREBOARD_VISIBLE", { visible: nextVisible });
+}
+
+function toggleScoreHidden() {
+  const nextVisible = !(lastState?.scoreHiddenVisible === true);
+  client.emit("SET_SCORE_HIDDEN", { visible: nextVisible });
+}
+
+function handleThinking() {
+  client.emit("PLAY_SFX", { key: "thinking" });
+}
+
+function handleSkipOrWrong() {
+  if (canJudgeFromState(lastState)) {
+    handleWrong();
+    return;
+  }
+  client.emit("JUDGE_SKIP");
+}
+
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = String(target.tagName || "").toLowerCase();
@@ -286,8 +325,8 @@ function isTypingTarget(target) {
 }
 
 els.present.addEventListener("click", handlePresent);
-els.buzzerReset?.addEventListener("click", () => client.emit("BUZZER_RESET"));
-els.thinking.addEventListener("click", () => client.emit("PLAY_SFX", { key: "thinking" }));
+els.buzzerReset?.addEventListener("click", handleReset);
+els.thinking.addEventListener("click", handleThinking);
 els.correct.addEventListener("click", handleCorrect);
 els.wrong.addEventListener("click", handleWrong);
 els.skip.addEventListener("click", () => client.emit("JUDGE_SKIP"));
@@ -297,12 +336,21 @@ window.addEventListener("keydown", (e) => {
   if (isTypingTarget(e.target)) return;
 
   const key = String(e.key || "").toLowerCase();
-  if (key === "o") {
+  if (key === "q") {
+    e.preventDefault();
+    handlePresent();
+  } else if (key === "r") {
+    e.preventDefault();
+    handleReset();
+  } else if (key === "t") {
+    e.preventDefault();
+    handleThinking();
+  } else if (key === "o") {
     e.preventDefault();
     handleCorrect();
   } else if (key === "x") {
     e.preventDefault();
-    handleWrong();
+    handleSkipOrWrong();
   }
 });
 
@@ -358,6 +406,7 @@ toggleJoinQrTop?.addEventListener("click", toggleJoinQrVisibility);
   els.showVerticalRestCount,
   els.showVerticalBuzzOrder,
   els.swapJudgeColors,
+  els.playerTileDarkTheme,
   els.showMarks,
   els.showMarkCorrect,
   els.showMarkWrong
@@ -368,6 +417,9 @@ els.acReset.addEventListener("click", () => {
   if (!confirm("本当にリセットしますか？")) return;
   client.emit("AC_RESET");
 });
+toggleModScoreboardBtn?.addEventListener("click", toggleModScoreboard);
+toggleScoreHiddenBtn?.addEventListener("click", toggleScoreHidden);
+toggleTitleScreenBtn?.addEventListener("click", toggleTitleScreen);
 
 els.qno?.addEventListener("change", commitQuestionNo);
 els.qno?.addEventListener("keydown", (e) => {
@@ -490,6 +542,7 @@ function emitUiPrefs() {
     showVerticalRestCount: els.showVerticalRestCount?.checked !== false,
     showVerticalBuzzOrder: els.showVerticalBuzzOrder?.checked !== false,
     swapJudgeColors: !!els.swapJudgeColors?.checked,
+    playerTileDarkTheme: !!els.playerTileDarkTheme?.checked,
     showMarks: els.showMarks.checked,
     showMarkCorrect: els.showMarkCorrect.checked,
     showMarkWrong: els.showMarkWrong.checked
@@ -656,6 +709,29 @@ function buildRankMap(players, connectionOrderMap) {
   return rankMap;
 }
 
+function buildFrozenRankSortedPlayers(st, players, connectionOrderMap) {
+  const snapshot = Array.isArray(st.ui?.rankSortOrder) ? st.ui.rankSortOrder : [];
+  if (!snapshot.length) {
+    return [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  }
+
+  const playersById = new Map(players.map((p) => [p.id, p]));
+  const ordered = [];
+  const seen = new Set();
+  for (const id of snapshot) {
+    const player = playersById.get(String(id || ""));
+    if (!player || seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  for (const player of players) {
+    if (seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  return ordered;
+}
+
 function renderPlayersGrid(st) {
   const grid = els.playersGrid;
   grid.innerHTML = "";
@@ -666,7 +742,7 @@ function renderPlayersGrid(st) {
   const rankMap = buildRankMap(players, connectionOrderMap);
   const controllerSortMode = String(st.ui?.controllerSortMode || "manual");
 
-  const rankSortedPlayers = [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  const rankSortedPlayers = buildFrozenRankSortedPlayers(st, players, connectionOrderMap);
   const sorted = controllerSortMode === "rank"
     ? [
         ...rankSortedPlayers
@@ -1012,6 +1088,7 @@ client.onState((st) => {
   if (els.showVerticalRestCount) els.showVerticalRestCount.checked = st.ui?.showVerticalRestCount !== false;
   if (els.showVerticalBuzzOrder) els.showVerticalBuzzOrder.checked = st.ui?.showVerticalBuzzOrder !== false;
   if (els.swapJudgeColors) els.swapJudgeColors.checked = !!st.ui?.swapJudgeColors;
+  if (els.playerTileDarkTheme) els.playerTileDarkTheme.checked = !!st.ui?.playerTileDarkTheme;
   els.showMarks.checked = !!st.ui?.showMarks;
   els.showMarkCorrect.checked = st.ui?.showMarkCorrect !== false;
   els.showMarkWrong.checked = st.ui?.showMarkWrong !== false;
@@ -1025,6 +1102,27 @@ client.onState((st) => {
   }
   if (els.autoNextEnabled) els.autoNextEnabled.checked = !!st.rules?.autoNextEnabled;
   if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDelayMs ?? 800);
+  if (toggleTitleScreenBtn) {
+    const on = st.titleScreenVisible === true;
+    toggleTitleScreenBtn.dataset.on = on ? "1" : "0";
+    toggleTitleScreenBtn.title = on ? "蓋画を隠す" : "蓋画を表示";
+  }
+  if (toggleModScoreboardBtn) {
+    const modActive = !!String(st?.mods?.active || "").trim();
+    const on = modActive && st.modScoreboardVisible === true;
+    toggleModScoreboardBtn.disabled = !modActive;
+    toggleModScoreboardBtn.dataset.on = on ? "1" : "0";
+    toggleModScoreboardBtn.title = !modActive
+      ? "MOD適用時に使用できます"
+        : on
+        ? "MOD表示に戻す"
+        : "得点板を表示";
+  }
+  if (toggleScoreHiddenBtn) {
+    const on = st.scoreHiddenVisible === true;
+    toggleScoreHiddenBtn.dataset.on = on ? "1" : "0";
+    toggleScoreHiddenBtn.title = on ? "得点非表示を解除" : "得点を非表示";
+  }
 
   els.qualifyEnabled.checked = !!st.rules?.qualifyEnabled;
   els.qualifyScore.value = String(st.rules?.qualifyScore ?? 4);
@@ -1093,6 +1191,16 @@ window.addEventListener("message", (ev) => {
     return;
   }
 
+  if (cmd.type === "BUZZER_RESET") {
+    handleReset();
+    return;
+  }
+
+  if (cmd.type === "SKIP_OR_WRONG") {
+    handleSkipOrWrong();
+    return;
+  }
+
   if (cmd.type === "RELOAD") {
     location.reload();
     return;
@@ -1117,6 +1225,7 @@ function openPanel(panel) {
   settingsPanel.hidden = true;
   visualSettingsPanel.hidden = true;
   modsSettingPanel.hidden = true;
+  helpPanel.hidden = true;
   panel.hidden = false;
 }
 const modReset = document.getElementById("modReset");
@@ -1138,6 +1247,9 @@ document.getElementById("openVisualSettings")
 
 document.getElementById("openSettings")
   ?.addEventListener("click", () => openPanel(settingsPanel));
+
+document.getElementById("openHelp")
+  ?.addEventListener("click", () => openPanel(helpPanel));
 
 document.getElementById("openModsSettings")
   ?.addEventListener("click", () => openPanel(modsSettingPanel));

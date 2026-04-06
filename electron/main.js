@@ -3,12 +3,79 @@ const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
 const port = 37344
+const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
 
 process.env.QUMO_PACKAGED = app.isPackaged ? "1" : "0";
 
 let serverHandle;
 let controllerWin = null;
 let visualizerWin = null;
+
+function loadWindowStates() {
+  try {
+    return JSON.parse(fs.readFileSync(windowStateFile(), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowStates(states) {
+  try {
+    fs.mkdirSync(path.dirname(windowStateFile()), { recursive: true });
+    fs.writeFileSync(windowStateFile(), JSON.stringify(states, null, 2), "utf8");
+  } catch (err) {
+    console.warn("Failed to save window state:", err);
+  }
+}
+
+function isValidBounds(bounds) {
+  if (!bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height)) return false;
+  if (bounds.width < 200 || bounds.height < 200) return false;
+
+  const displays = screen.getAllDisplays();
+  return displays.some((display) => {
+    const area = display.workArea;
+    const intersects =
+      bounds.x < area.x + area.width &&
+      bounds.x + bounds.width > area.x &&
+      bounds.y < area.y + area.height &&
+      bounds.y + bounds.height > area.y;
+    return intersects;
+  });
+}
+
+function getWindowState(role, fallbackBounds) {
+  const states = loadWindowStates();
+  const saved = states?.[role];
+  if (!isValidBounds(saved)) return { ...fallbackBounds };
+  return { ...fallbackBounds, ...saved };
+}
+
+function persistWindowState(role, win) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const states = loadWindowStates();
+  states[role] = bounds;
+  saveWindowStates(states);
+}
+
+function bindWindowStatePersistence(win, role) {
+  let saveTimer = null;
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      persistWindowState(role, win);
+    }, 150);
+  };
+
+  win.on("resize", scheduleSave);
+  win.on("move", scheduleSave);
+  win.on("close", () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    persistWindowState(role, win);
+  });
+}
 
 async function startServer() {
   const { start } = require(path.join(__dirname, "..", "server", "index.js"));
@@ -56,12 +123,16 @@ function startTunnelWriteFile(port) {
 
 
 function createControllerWindow(url) {
-  const win = new BrowserWindow({
+  const bounds = getWindowState("controller", {
     width: 900,
-    height: 900,
+    height: 900
+  });
+  const win = new BrowserWindow({
+    ...bounds,
     webPreferences: { preload: path.join(__dirname, "preload.js") }
   });
   win._role = "controller";
+  bindWindowStatePersistence(win, "controller");
   win.loadURL(url);
   bindQuitOnClose(win);
   controllerWin = win;
@@ -71,15 +142,21 @@ function createControllerWindow(url) {
 function createVisualizerWindow(url) {
   const displays = screen.getAllDisplays();
   const external = displays.find(d => d.bounds.x !== 0 || d.bounds.y !== 0) ?? displays[0];
-
-  const win = new BrowserWindow({
+  const bounds = getWindowState("visualizer", {
     width: 1920,
     height: 1080,
+    x: external.bounds.x,
+    y: external.bounds.y
+  });
+
+  const win = new BrowserWindow({
+    ...bounds,
     frame: true,
     fullscreen: false,
     webPreferences: { preload: path.join(__dirname, "preload.js") }
   });
   win._role = "visualizer";
+  bindWindowStatePersistence(win, "visualizer");
   bindQuitOnClose(win);
   win.setMenuBarVisibility(false);
   win.loadURL(url);

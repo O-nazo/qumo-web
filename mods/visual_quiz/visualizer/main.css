@@ -1,6 +1,10 @@
 :root{
   --bg: #000;
   --panel: #0b0b0b;
+  --qumo-mod-overlay-width: 0px;
+  --qumo-mod-overlay-gutter: 0px;
+  --qumo-mod-side-shift: calc(var(--qumo-mod-overlay-width) + var(--qumo-mod-overlay-gutter));
+  --qumo-stage-edge-gap: 18px;
 
   --frame: #f2f2f2;
   --frameShadow: rgba(0,0,0,0.55);
@@ -18,7 +22,11 @@
   --telopFrame: rgba(255,255,255,0.9);
 }
 
-html, body{ height: 100%; }
+html, body{
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
 
 body{
   margin: 0;
@@ -39,18 +47,29 @@ body{
 
 /* 窓＋テロップを“固定”配置（テロップ表示でずれない） */
 #stage{
-  height: 100vh;
-  width: 100vw;
-  display: grid;
-  place-items: center;
-  padding: 24px;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    var(--qumo-stage-edge-gap)
+    var(--qumo-stage-edge-gap)
+    var(--qumo-stage-edge-gap)
+    max(var(--qumo-stage-edge-gap), calc(var(--qumo-mod-side-shift) + var(--qumo-stage-edge-gap)));
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 #scene{
   position: relative;
-  width: min(92vw, 1280px);
+  width: min(
+    calc(100vw - var(--qumo-mod-side-shift) - (var(--qumo-stage-edge-gap) * 2)),
+    calc((100vh - (var(--qumo-stage-edge-gap) * 2)) * 16 / 9)
+  );
   aspect-ratio: 16 / 9;   /* 窓の比率を固定 */
+  max-height: calc(100vh - (var(--qumo-stage-edge-gap) * 2));
+  flex: 0 1 auto;
 }
 
 
@@ -98,7 +117,8 @@ body{
 }
 
 /* 問題画像：蓋のさらに下 */
-#q-image{
+#q-image,
+#q-video{
   position: absolute;
   inset: 0;
   width: 100%;
@@ -106,6 +126,11 @@ body{
   object-fit: contain;
   display: block;
   z-index: 1;
+}
+
+#q-video[hidden],
+#q-image[hidden] {
+  display: none;
 }
 
 /* 蓋（上下） */
@@ -155,6 +180,10 @@ body{
   transition: transform 0.1s steps(10, end);
 }
 
+#window-inner.instantClose .lid {
+  transition: none;
+}
+
 /* 問題文：全文を“同じ位置”で2回描画し、上下で見える領域だけ変える */
 .qtext{
   position: absolute;
@@ -202,6 +231,30 @@ body{
 /* 下蓋：全文キャンバスを半分上にずらして、下半分が見えるようにする */
 .lid.bottom .qtext{
   top: -100%;                   /* 1枚分(=蓋の高さ) 上へ */
+}
+
+#title-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  pointer-events: none;
+}
+
+#title-screen[hidden] {
+  display: none;
+}
+
+#title-screen-logo {
+  display: block;
+  width: 92%;
+  max-width: none;
+  max-height: 84%;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 10px 22px rgba(0,0,0,0.5));
 }
 
 /* 解答テロップ（高さ固定） */

@@ -5,12 +5,12 @@ const phaseEl = document.getElementById("phase");
 const timerEl = document.getElementById("timer");
 const remainingEl = document.getElementById("remaining");
 
-function formatClock(ms) {
+function formatClock(ms, { fixedCentiseconds = false } = {}) {
   const safe = Math.max(0, Number(ms ?? 0));
   const totalSeconds = Math.floor(safe / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  const centiseconds = Math.floor((safe % 1000) / 10);
+  const centiseconds = fixedCentiseconds ? 0 : Math.floor((safe % 1000) / 10);
 
   return [
     String(minutes).padStart(2, "0"),
@@ -22,9 +22,9 @@ function formatClock(ms) {
 function getPhaseLabel(phase) {
   switch (phase) {
     case "countdown":
-      return "COUNTDOWN";
+      return "READY";
     case "running":
-      return "RUNNING";
+      return "";
     case "stopped":
       return "STOPPED";
     case "clear":
@@ -32,21 +32,16 @@ function getPhaseLabel(phase) {
     case "timeout":
       return "TIME UP";
     default:
-      return "STANDBY";
+      return "STAND-BY";
   }
 }
 
 function computeRemainingCount() {
-  if (modState && Number.isFinite(Number(modState.remainingCount))) {
-    return Math.max(0, Number(modState.remainingCount));
-  }
-
   const players = Object.values(coreState?.players || {});
   return players.filter((player) => {
     if (!player?.id) return false;
     if (player.connected === false) return false;
-    if (player.status === "disqualified") return false;
-    return !player.modDisabled;
+    return player.status === "active";
   }).length;
 }
 
@@ -57,22 +52,30 @@ function render() {
   const displayMs = phase === "countdown"
     ? modState?.displayCountdownMs
     : modState?.displayMs;
+  const phaseLabel = getPhaseLabel(phase);
+  const isCountdownStartCue = phase === "countdown" && Number(displayMs ?? 0) < 1000;
 
-  phaseEl.textContent = getPhaseLabel(phase);
-  timerEl.textContent = formatClock(displayMs ?? modState?.durationMs ?? 0);
-  remainingEl.textContent = String(computeRemainingCount());
-}
-
-if (window.QUMO_MOD_API) {
-  window.QUMO_MOD_API.onState((state) => {
-    coreState = state;
-    render();
-  });
+  document.body.classList.toggle("is-clear", phase === "clear");
+  phaseEl.textContent = phaseLabel;
+  phaseEl.classList.toggle("is-hidden", phaseLabel === "");
+  timerEl.classList.toggle("is-start-cue", isCountdownStartCue);
+  timerEl.textContent = isCountdownStartCue
+    ? "START"
+    : formatClock(displayMs ?? modState?.durationMs ?? 0, {
+        fixedCentiseconds: phase === "countdown"
+      });
+  remainingEl.textContent = String(computeRemainingCount()).padStart(2, "0");
 }
 
 window.addEventListener("message", (ev) => {
   const msg = ev.data;
   if (!msg) return;
+
+  if (msg.type === "MOD_STATE") {
+    coreState = msg.state || null;
+    render();
+    return;
+  }
 
   if (msg.type === "MOD_EVENT" && msg.event?.type === "STATE") {
     modState = msg.event.state;

@@ -172,6 +172,19 @@ export function stopThinking() {
   } catch { /* noop */ }
 }
 
+export function stopAllSfx() {
+  stopThinking();
+  stopOneShotSequence();
+  for (const pool of pools.values()) {
+    for (const audio of pool.audios) {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch {}
+    }
+  }
+}
+
 export async function startThinking(durationSec) {
   // durationSec <= 0 は「開始せず即停止」扱い
   const sec = Math.max(0, Number(durationSec ?? 0));

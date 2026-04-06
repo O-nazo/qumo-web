@@ -1,5 +1,5 @@
 import { createClient } from "/common/common.js";
-import { playSfxOnce, playSfxSequence, toggleThinking, warmupSfx } from "/common/sfx.js";
+import { playSfxOnce, playSfxSequence, stopAllSfx, toggleThinking, warmupSfx } from "/common/sfx.js";
 
 const client = createClient({ screen: "visualizer" });
 const joinQrOverlay = document.querySelector("#joinQrOverlay");
@@ -33,6 +33,8 @@ if (window.QUMO_MOD_API) {
 
 let currentMainModId = null;
 let mainFrame = null;
+const MOD_OVERLAY_WIDTH = 252;
+const MOD_OVERLAY_GUTTER = 28;
 
 function loadMain(modId) {
   const id = String(modId || "").trim();
@@ -54,7 +56,18 @@ function loadMain(modId) {
   iframe.className = "modMainFrame";
   iframe.setAttribute("title", `MOD main: ${id}`);
   iframe.addEventListener("load", () => {
+    syncEmbeddedModLayout();
     iframe.contentWindow?.postMessage({ type: "MOD_INIT", modId: id }, "*");
+    if (lastState) {
+      iframe.contentWindow?.postMessage({ type: "MOD_STATE", state: lastState }, "*");
+    }
+    if (id === "visual_quiz") {
+      client.send({
+        type: "MOD_CMD",
+        modId: id,
+        cmd: { type: "VQ_SYNC_STATE" }
+      });
+    }
   });
 
   // main側で操作したいので pointer events は ON
@@ -62,6 +75,19 @@ function loadMain(modId) {
 
   root.appendChild(iframe);
   mainFrame = iframe;
+}
+
+function syncEmbeddedModLayout() {
+  if (!mainFrame) return;
+  try {
+    const root = mainFrame.contentDocument?.documentElement;
+    if (!root) return;
+    root.style.setProperty("--qumo-mod-overlay-width", `${MOD_OVERLAY_WIDTH}px`);
+    root.style.setProperty("--qumo-mod-overlay-gutter", `${MOD_OVERLAY_GUTTER}px`);
+    root.classList.add("qumo-mod-with-player-overlay");
+  } catch (e) {
+    console.warn("[MOD] failed to sync embedded layout", e);
+  }
 }
 
 client.onMessage?.((msg) => {
@@ -94,12 +120,13 @@ client.onMessage?.((msg) => {
 
 const hudRoot = document.querySelector("#hud-root");
 
-let hudMode = "full"; // "full" | "compact" | "pressedOnly"
+let hudMode = "full"; // "full" | "overlay" | "compact" | "pressedOnly"
 
 function applyHudClasses(modActive) {
   document.body.classList.toggle("modView", !!modActive);
 
   if (hudRoot) {
+    hudRoot.classList.toggle("overlay", hudMode === "overlay");
     hudRoot.classList.toggle("compact", hudMode === "compact");
     hudRoot.classList.toggle("pressedOnly", hudMode === "pressedOnly");
   }
@@ -231,6 +258,9 @@ function buildRankMap(players, connectionOrderMap) {
 }
 
 function renderRankBadge(rank, className) {
+  if (rank == null || rank === "" || !Number.isFinite(Number(rank))) {
+    return `<span class="${className} rankBadge is-hidden"><span>?th</span></span>`;
+  }
   const text = ordinalShortEn(rank);
   if (rank === 1) {
     return `<span class="${className} rankBadge is-first"><i class="fa-solid fa-crown" aria-hidden="true"></i><span>${text}</span></span>`;
@@ -295,12 +325,60 @@ function getOrderedConnectedPlayers(st) {
   return result;
 }
 
+function normalizePlayerIdForSort(id) {
+  const raw = String(id ?? "");
+  const num = Number.parseInt(raw, 10);
+  if (Number.isFinite(num) && String(num) === raw) {
+    return { numeric: true, value: num, raw };
+  }
+  return { numeric: false, value: raw, raw };
+}
+
 function buildConnectionOrderMap(players) {
   const orderMap = new Map();
-  players.forEach((p, idx) => {
+  const sortedById = [...players].sort((a, b) => {
+    const aKey = normalizePlayerIdForSort(a?.id);
+    const bKey = normalizePlayerIdForSort(b?.id);
+    if (aKey.numeric && bKey.numeric && aKey.value !== bKey.value) {
+      return aKey.value - bKey.value;
+    }
+    if (aKey.numeric !== bKey.numeric) {
+      return aKey.numeric ? -1 : 1;
+    }
+    return String(aKey.raw).localeCompare(String(bKey.raw), "ja");
+  });
+
+  sortedById.forEach((p, idx) => {
     orderMap.set(p.id, idx);
   });
   return orderMap;
+}
+
+function buildFrozenRankSortedPlayers(st, players, connectionOrderMap) {
+  const snapshot = Array.isArray(st.ui?.rankSortOrder) ? st.ui.rankSortOrder : [];
+  return buildPlayersFromSnapshot(players, snapshot, connectionOrderMap);
+}
+
+function buildPlayersFromSnapshot(players, snapshot, connectionOrderMap) {
+  if (!snapshot.length) {
+    return [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  }
+
+  const playersById = new Map(players.map((p) => [p.id, p]));
+  const ordered = [];
+  const seen = new Set();
+  for (const id of snapshot) {
+    const player = playersById.get(String(id || ""));
+    if (!player || seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  for (const player of players) {
+    if (seen.has(player.id)) continue;
+    seen.add(player.id);
+    ordered.push(player);
+  }
+  return ordered;
 }
 
 function renderPlayers(st, mode = "full") {
@@ -317,6 +395,7 @@ function renderPlayers(st, mode = "full") {
   const showMarks = !!ui.showMarks;
   const showMarkCorrect = ui.showMarkCorrect !== false;
   const showMarkWrong = ui.showMarkWrong !== false;
+  const isOverlayMode = mode === "overlay";
   const isVerticalLayout = ui.playerTileLayout === "vertical" && mode === "full";
   const visualizerSortMode = String(ui.visualizerSortMode || "manual");
   const showVerticalScore = ui.showVerticalScore !== false;
@@ -324,20 +403,34 @@ function renderPlayers(st, mode = "full") {
   const showVerticalWrongCount = ui.showVerticalWrongCount !== false;
   const showVerticalRestCount = ui.showVerticalRestCount !== false;
   const showVerticalBuzzOrder = ui.showVerticalBuzzOrder !== false;
+  const showOverlayBuzzOrder = isOverlayMode && (st.buzzer?.buzzOrder?.length ?? 0) > 0;
   const rankMap = buildRankMap(players, connectionOrderMap);
+  const scoreHidden = st.scoreHiddenVisible === true;
+  const hiddenScoreSnapshot = Array.isArray(st.ui?.hiddenScoreRankSortOrder) ? st.ui.hiddenScoreRankSortOrder : [];
+  const hiddenRankLocked = scoreHidden && hiddenScoreSnapshot.length > 0;
 
   grid.classList.toggle("verticalMode", isVerticalLayout);
+  grid.classList.toggle("overlayMode", isOverlayMode);
 
   // 並び：押した人（押下順）→ まだ押してない人（名前順）
-  const rankSortedPlayers = [...players].sort((a, b) => compareRankOrder(a, b, connectionOrderMap));
+  const rankSortedPlayers = hiddenRankLocked
+    ? buildPlayersFromSnapshot(players, hiddenScoreSnapshot, connectionOrderMap)
+    : buildFrozenRankSortedPlayers(st, players, connectionOrderMap);
   const pressed = rankSortedPlayers
     .filter(p => orderMap.has(p.id))
     .sort((a, b) => orderMap.get(a.id).order - orderMap.get(b.id).order);
 
   const notPressed = rankSortedPlayers.filter(p => !orderMap.has(p.id));
 
-  const sorted = visualizerSortMode === "rank"
+  const rankModePlayers = hiddenRankLocked
+    ? rankSortedPlayers
+    : showOverlayBuzzOrder
     ? [...pressed, ...notPressed]
+    : rankSortedPlayers;
+  const sorted = isOverlayMode
+    ? rankModePlayers
+    : visualizerSortMode === "rank"
+    ? rankModePlayers
     : players;
 
   const cur = getCurrentRespondent(st);
@@ -358,10 +451,18 @@ function renderPlayers(st, mode = "full") {
     return "verticalName";
   }
 
+  function getOverlayNameClass(name) {
+    const len = Array.from(String(name || "")).length;
+    if (len >= 22) return "overlayName overlayName-xxs";
+    if (len >= 18) return "overlayName overlayName-xs";
+    if (len >= 14) return "overlayName overlayName-sm";
+    return "overlayName";
+  }
+
   for (const p of sorted) {
     const info = orderMap.get(p.id) || null;
     const order = info ? info.order : null;
-    const scoreRank = rankMap.get(p.id) ?? 1;
+    const scoreRank = scoreHidden ? null : (rankMap.get(p.id) ?? 1);
 
     let gapText = "-";
     if (info && firstAt != null && order >= 2) gapText = formatGapSeconds(info.at - firstAt);
@@ -385,12 +486,12 @@ function renderPlayers(st, mode = "full") {
     const correctCount = Number(p.correctCount ?? 0);
     const wrongCount = Number(p.wrongCount ?? 0);
 
-    const markCorrectText = showMarks && showMarkCorrect ? repeatSafe("○", correctCount) : "";
-    const markWrongText = showMarks && showMarkWrong ? repeatSafe("✕", wrongCount) : "";
+    const markCorrectText = showMarks && showMarkCorrect ? (scoreHidden ? "?" : repeatSafe("○", correctCount)) : "";
+    const markWrongText = showMarks && showMarkWrong ? (scoreHidden ? "?" : repeatSafe("✕", wrongCount)) : "";
     const showMarksRow = !!showMarks;
     const countSummary = [
-      showCorrectCount ? `<span class="countSummaryItem countSummaryCorrect">○${correctCount}</span>` : "",
-      showWrongCount ? `<span class="countSummaryItem countSummaryWrong">✕${wrongCount}</span>` : ""
+      showCorrectCount ? `<span class="countSummaryItem countSummaryCorrect">○${scoreHidden ? "?" : correctCount}</span>` : "",
+      showWrongCount ? `<span class="countSummaryItem countSummaryWrong">✕${scoreHidden ? "?" : wrongCount}</span>` : ""
     ].filter(Boolean).join("");
 
     const reachWin = !!p.reach?.qualify;
@@ -415,9 +516,9 @@ function renderPlayers(st, mode = "full") {
     if (isVerticalLayout) {
       const verticalBuzzText = showVerticalBuzzOrder ? formatVerticalBuzzOrder(order, gapText) : "";
       const verticalStats = [
-        showVerticalScore ? `<span class="verticalStat verticalStat-score">${Number(p.score ?? 0)}</span>` : "",
-        showVerticalCorrectCount ? `<span class="verticalStat verticalStat-correct"><span class="verticalStatGlyph verticalStatGlyph-circle">○</span><span class="verticalStatValue">${correctCount}</span></span>` : "",
-        showVerticalWrongCount ? `<span class="verticalStat verticalStat-wrong"><span class="verticalStatGlyph verticalStatGlyph-cross">✕</span><span class="verticalStatValue">${wrongCount}</span></span>` : "",
+        showVerticalScore ? `<span class="verticalStat verticalStat-score">${scoreHidden ? "?" : Number(p.score ?? 0)}</span>` : "",
+        showVerticalCorrectCount ? `<span class="verticalStat verticalStat-correct"><span class="verticalStatGlyph verticalStatGlyph-circle">○</span><span class="verticalStatValue">${scoreHidden ? "?" : correctCount}</span></span>` : "",
+        showVerticalWrongCount ? `<span class="verticalStat verticalStat-wrong"><span class="verticalStatGlyph verticalStatGlyph-cross">✕</span><span class="verticalStatValue">${scoreHidden ? "?" : wrongCount}</span></span>` : "",
         showVerticalRestCount ? `<span class="verticalStat verticalStat-rest"><span class="verticalStatGlyph verticalStatGlyph-rest">休</span><span class="verticalStatValue">${restCount}</span></span>` : ""
       ].filter(Boolean).join("");
 
@@ -426,6 +527,26 @@ function renderPlayers(st, mode = "full") {
         <div class="${getVerticalNameClass(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
         <div class="verticalBuzzRow${verticalBuzzText ? "" : " is-empty"}">${verticalBuzzText || "&nbsp;"}</div>
         <div class="verticalStats">${verticalStats}</div>
+      `;
+    } else if (isOverlayMode) {
+      const showBuzzRankOnly = showOverlayBuzzOrder && !!order;
+      const overlayPrimaryText = showBuzzRankOnly
+        ? (scoreHidden ? "?" : ordinalShortEn(order))
+        : (scoreHidden ? "?" : String(Number(p.score ?? 0)));
+      const overlayValueClass = showBuzzRankOnly ? "overlayValue is-buzz" : "overlayValue";
+      const overlayCrown = !scoreHidden && !showBuzzRankOnly && scoreRank === 1
+        ? `<i class="fa-solid fa-crown overlayScoreCrown" aria-hidden="true"></i>`
+        : "";
+
+      tile.innerHTML = `
+        <div class="overlayTileRow">
+          <div class="overlayNameBlock">
+            <div class="${getOverlayNameClass(p.name)}" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
+          </div>
+          <div class="overlayValueBlock">
+            <div class="${overlayValueClass}">${overlayCrown}<span>${escapeHtml(overlayPrimaryText)}</span></div>
+          </div>
+        </div>
       `;
     } else if (mode === "compact") {
       // “名前・得点・押した順”だけ
@@ -436,7 +557,7 @@ function renderPlayers(st, mode = "full") {
         </div>
         <div class="nameRow">
           <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
-          ${showScore ? `<div class="score">${Number(p.score ?? 0)}</div>` : ``}
+          ${showScore ? `<div class="score">${scoreHidden ? "?" : Number(p.score ?? 0)}</div>` : ``}
         </div>
         ${(countSummary || buzzOrderText) ? `
         <div class="countSummaryRow">
@@ -455,7 +576,7 @@ function renderPlayers(st, mode = "full") {
         <div class="nameRow">
           <div class="name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</div>
           ${reachHtml}
-          ${showScore ? `<div class="score">${Number(p.score ?? 0)}</div>` : ``}
+          ${showScore ? `<div class="score">${scoreHidden ? "?" : Number(p.score ?? 0)}</div>` : ``}
         </div>
         ${(countSummary || buzzOrderText) ? `
         <div class="countSummaryRow">
@@ -484,6 +605,7 @@ function renderPlayers(st, mode = "full") {
 client.onState((st) => {
   lastState = st;
   document.body.classList.toggle("swapJudgeColors", !!st.ui?.swapJudgeColors);
+  document.body.classList.toggle("playerTileDarkTheme", !!st.ui?.playerTileDarkTheme);
 
   // 先にUIを更新（音で描画が遅れないようにする）
   if(st.buzzer.firstBuzz != null){
@@ -495,21 +617,8 @@ client.onState((st) => {
 
   renderJoinQr(st);
 
-  function computeHudMode(st, modActive) {
-    // MOD VIEW時は最初から full は使わない（要求どおり）
-    const base = modActive ? "compact" : "full";
-
-    // 人数が多ければ先に落とす（目安）
-    const n = Object.values(st.players || {}).filter((p) => p?.connected !== false).length;
-    let mode = base;
-    if (modActive && n >= 9) mode = "pressedOnly"; // 目安：増えたら一気に押した人だけ
-
-    return mode;
-  }
-
-  function isHudOverflowing() {
-    if (!hudRoot) return false;
-    return hudRoot.scrollHeight > hudRoot.clientHeight + 2;
+  function computeHudMode(_st, modActive) {
+    return modActive ? "overlay" : "full";
   }
 
   // ここから音（描画の後・awaitしない）
@@ -530,7 +639,9 @@ client.onState((st) => {
 
     // Promiseは待たずに投げる（UIを止めない）
     try {
-      if (key === "thinking") {
+      if (key === "__stop__") {
+        stopAllSfx();
+      } else if (key === "thinking") {
         const sec = Number(s.durationSec ?? st.rules?.thinkingSeconds ?? 5);
         void toggleThinking(sec);
       } else if (chainKey) {
@@ -552,9 +663,12 @@ client.onState((st) => {
   // ★ main をロード
   const modId = st?.mods?.active || null;
   const modActive = !!modId;
+  const modScoreboardVisible = modActive && st?.modScoreboardVisible === true;
+  const modDisplayActive = modActive && !modScoreboardVisible;
 
   if (modId) {
     loadMain(modId);
+    syncEmbeddedModLayout();
     if (mainFrame && mainFrame.contentWindow) {
       mainFrame.contentWindow.postMessage({ type: "MOD_STATE", state: st }, "*");
     }
@@ -568,30 +682,17 @@ client.onState((st) => {
 
   
   // 1) ベースモードを決める
-  let nextHudMode = computeHudMode(st, modActive);
+  let nextHudMode = computeHudMode(st, modDisplayActive);
   hudMode = nextHudMode;
-  applyHudClasses(modActive);
+  applyHudClasses(modDisplayActive);
 
   // 2) まず描画
   renderPlayers(st, hudMode);
 
-  // 3) 入りきらなければ段階的に落として再描画
-  if (modActive && isHudOverflowing() && hudMode === "full") {
-    hudMode = "compact";
-    applyHudClasses(modActive);
-    renderPlayers(st, hudMode);
-  }
-
-  if (modActive && isHudOverflowing() && hudMode !== "pressedOnly") {
-    hudMode = "pressedOnly";
-    applyHudClasses(modActive);
-    renderPlayers(st, "compact"); // 見た目はcompactのまま、CSSでpressed以外を消す
-  }
-
-  if (!modActive) {
+  if (!modDisplayActive) {
     hudMode = "full";
     document.body.classList.remove("modView");
-    hudRoot?.classList.remove("compact", "pressedOnly");
+    hudRoot?.classList.remove("overlay", "compact", "pressedOnly");
   }
 
 

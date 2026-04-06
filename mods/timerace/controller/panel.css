@@ -79,6 +79,22 @@ body {
   font-size: 13px;
 }
 
+.timeInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.timeField {
+  display: grid;
+  gap: 6px;
+}
+
+.timeField span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 input {
   width: 100%;
   padding: 12px 14px;

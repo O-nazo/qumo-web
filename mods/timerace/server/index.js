@@ -9,7 +9,6 @@ function clampInt(value, min, max, fallback) {
 function registerTimerace(ctx) {
   let tickTimer = null;
   let previousRules = null;
-  let roundPlayerIds = new Set();
 
   const state = {
     phase: "idle",
@@ -19,9 +18,6 @@ function registerTimerace(ctx) {
     displayCountdownMs: 10000,
     resumePhase: null,
     participantIds: [],
-    clearedIds: [],
-    baselines: {},
-    lastClearedPlayerId: null,
     startedAt: null,
     endedAt: null
   };
@@ -61,23 +57,16 @@ function registerTimerace(ctx) {
     tickTimer = null;
   }
 
-  function clearModFlags() {
-    const players = getPlayers();
-    for (const playerId of roundPlayerIds) {
-      const player = players[playerId];
-      if (!player) continue;
-      delete player.modDisabled;
-      delete player.modDisabledReason;
-    }
-    roundPlayerIds = new Set();
-  }
-
   function applyTimeraceRules() {
     const root = ctx.getState();
     if (!root) return;
 
     if (!previousRules) {
       previousRules = {
+        qualifyEnabled: root.rules?.qualifyEnabled,
+        qualifyScore: root.rules?.qualifyScore,
+        qualifyCountEnabled: root.rules?.qualifyCountEnabled,
+        qualifyCorrectCount: root.rules?.qualifyCorrectCount,
         restPenalty: root.rules?.restPenalty,
         wrongPoints: root.rules?.wrongPoints,
         dqEnabled: root.rules?.dqEnabled,
@@ -85,6 +74,9 @@ function registerTimerace(ctx) {
       };
     }
 
+    root.rules.qualifyEnabled = false;
+    root.rules.qualifyCountEnabled = true;
+    root.rules.qualifyCorrectCount = 1;
     root.rules.restPenalty = 0;
     root.rules.wrongPoints = 0;
     root.rules.dqEnabled = false;
@@ -95,6 +87,10 @@ function registerTimerace(ctx) {
     const root = ctx.getState();
     if (!root || !previousRules) return;
 
+    root.rules.qualifyEnabled = previousRules.qualifyEnabled;
+    root.rules.qualifyScore = previousRules.qualifyScore;
+    root.rules.qualifyCountEnabled = previousRules.qualifyCountEnabled;
+    root.rules.qualifyCorrectCount = previousRules.qualifyCorrectCount;
     root.rules.restPenalty = previousRules.restPenalty;
     root.rules.wrongPoints = previousRules.wrongPoints;
     root.rules.dqEnabled = previousRules.dqEnabled;
@@ -102,12 +98,22 @@ function registerTimerace(ctx) {
     previousRules = null;
   }
 
+  function getCurrentRemainingCount() {
+    return getOrderedConnectedPlayers().filter((player) => player?.status === "active").length;
+  }
+
+  function getQualifiedParticipantIds() {
+    const players = getPlayers();
+    return state.participantIds.filter((playerId) => players[playerId]?.status === "qualified");
+  }
+
   function serializeState() {
+    const clearedIds = getQualifiedParticipantIds();
     return {
       ...state,
       participantCount: state.participantIds.length,
-      clearedCount: state.clearedIds.length,
-      remainingCount: Math.max(0, state.participantIds.length - state.clearedIds.length)
+      clearedCount: clearedIds.length,
+      remainingCount: getCurrentRemainingCount()
     };
   }
 
@@ -122,31 +128,6 @@ function registerTimerace(ctx) {
     });
   }
 
-  function recomputeCleared() {
-    const players = getPlayers();
-    const cleared = [];
-
-    for (const playerId of state.participantIds) {
-      const player = players[playerId];
-      if (!player) continue;
-
-      const baseline = Number(state.baselines[playerId] ?? 0);
-      const correctCount = Number(player.correctCount ?? 0);
-      const isCleared = correctCount >= baseline + 1;
-
-      player.modDisabled = isCleared;
-      player.modDisabledReason = isCleared ? "timerace-cleared" : null;
-      roundPlayerIds.add(playerId);
-
-      if (isCleared) cleared.push(playerId);
-    }
-
-    const prevSet = new Set(state.clearedIds);
-    const lastNewId = cleared.find((playerId) => !prevSet.has(playerId)) || null;
-    state.clearedIds = cleared;
-    if (lastNewId) state.lastClearedPlayerId = lastNewId;
-  }
-
   function finishPhase(nextPhase) {
     stopTick();
     state.phase = nextPhase;
@@ -156,7 +137,8 @@ function registerTimerace(ctx) {
   }
 
   function maybeFinishClear() {
-    if (state.participantIds.length > 0 && state.clearedIds.length >= state.participantIds.length) {
+    const clearedIds = getQualifiedParticipantIds();
+    if (state.participantIds.length > 0 && clearedIds.length >= state.participantIds.length) {
       finishPhase("clear");
       return true;
     }
@@ -181,7 +163,6 @@ function registerTimerace(ctx) {
 
     if (state.phase === "running") {
       state.displayMs = Math.max(0, Number(state.startedAt ?? now) - now);
-      recomputeCleared();
       if (maybeFinishClear()) return;
       if (state.displayMs <= 0) {
         state.displayMs = 0;
@@ -199,42 +180,25 @@ function registerTimerace(ctx) {
 
   function resetRoundState() {
     stopTick();
-    clearModFlags();
     state.phase = "idle";
     state.displayMs = state.durationMs;
     state.displayCountdownMs = state.countdownMs;
     state.resumePhase = null;
     state.participantIds = [];
-    state.clearedIds = [];
-    state.baselines = {};
-    state.lastClearedPlayerId = null;
     state.startedAt = null;
     state.endedAt = null;
   }
 
   function beginFreshRound() {
-    clearModFlags();
-
     const participants = getOrderedConnectedPlayers()
       .filter((player) => player?.id)
       .filter((player) => player.connected !== false)
       .filter((player) => player.status !== "disqualified");
 
     state.participantIds = participants.map((player) => player.id);
-    state.baselines = Object.fromEntries(
-      participants.map((player) => [player.id, Number(player.correctCount ?? 0)])
-    );
-    state.clearedIds = [];
-    state.lastClearedPlayerId = null;
     state.displayMs = state.durationMs;
     state.displayCountdownMs = state.countdownMs;
     state.endedAt = null;
-
-    for (const player of participants) {
-      player.modDisabled = false;
-      player.modDisabledReason = null;
-      roundPlayerIds.add(player.id);
-    }
   }
 
   function handleStart() {
@@ -312,14 +276,17 @@ function registerTimerace(ctx) {
 
   ctx.on("JUDGE_CORRECT", () => {
     if (state.phase !== "running" && state.phase !== "countdown" && state.phase !== "stopped") return;
-    recomputeCleared();
-    if (!maybeFinishClear()) emitState();
+    setTimeout(() => {
+      if (!maybeFinishClear()) emitState();
+    }, 0);
   });
 
   ctx.on("JUDGE_WRONG", () => {
     if (state.phase !== "running" && state.phase !== "countdown" && state.phase !== "stopped") return;
     emitState();
   });
+
+  ctx.on("AC_RESET", handleReset);
 
   ctx.on("TR_START", handleStart);
   ctx.on("TR_STOP", handleStop);

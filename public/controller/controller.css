@@ -473,8 +473,8 @@ button.danger:active {
 }
 
 .mainTop {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: auto;
   overflow: hidden;
   padding: 14px;
   border-radius: 16px;
@@ -483,13 +483,13 @@ button.danger:active {
 }
 
 .progressPanel {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10px;
-  min-height: 100%;
+  min-height: 0;
 }
 
 .progressRow {
@@ -761,6 +761,15 @@ button.danger:active {
   padding: 0;
 }
 
+.iconBtnLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
 .iconBtnDanger {
   background: #c62828;
 }
@@ -775,6 +784,21 @@ button.danger:active {
 
 .iconBtn:hover {
   background: #333;
+}
+
+.iconBtn:disabled {
+  background: #8a8a8a;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.iconBtn:disabled:hover {
+  background: #8a8a8a;
+}
+
+.iconBtn[data-on="1"]:not(.iconBtnDanger) {
+  background: #3357ff;
 }
 
 
@@ -827,6 +851,44 @@ button.danger:active {
   gap: 8px;
 }
 
+.judgeColorSampleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.judgeColorSample {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 2px;
+}
+
+.judgeColorChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(255,255,255,0.16);
+}
+
+.judgeColorChipCorrect {
+  color: var(--judge-correct);
+  background: color-mix(in srgb, var(--judge-correct) 18%, transparent);
+}
+
+.judgeColorChipWrong {
+  color: var(--judge-wrong);
+  background: color-mix(in srgb, var(--judge-wrong) 18%, transparent);
+}
+
 .modalSubsection {
   margin-top: 2px;
   padding-top: 6px;
@@ -843,6 +905,36 @@ button.danger:active {
 .layoutHint {
   font-size: 12px;
   color: rgba(255,255,255,0.7);
+}
+
+.helpList {
+  gap: 10px;
+}
+
+.helpItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+}
+
+.helpKey {
+  min-width: 40px;
+  text-align: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.12);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.helpDesc {
+  flex: 1 1 auto;
+  color: rgba(255,255,255,0.88);
 }
 
 #visualSettingsPanel .viewToggle {
@@ -894,7 +986,6 @@ button.danger:active {
   }
 
   .playersSection,
-  .mainTop,
   .modPanel {
     min-height: 240px;
   }

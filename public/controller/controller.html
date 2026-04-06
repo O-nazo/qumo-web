@@ -142,9 +142,18 @@
       <div class="overlayPanel" id="visualSettingsPanel" hidden>
         <h2>表示設定</h2>
         <div class="modalSection">
+          <div class="modalSectionTitle">全体</div>
           <div class="modalSectionBody">
             <div class="row">
-              <label><input id="swapJudgeColors" type="checkbox"> 正誤色を入れ替える</label>
+              <label><input id="playerTileDarkTheme" type="checkbox"> ダークモード</label>
+              <label class="judgeColorSampleLabel">
+                <input id="swapJudgeColors" type="checkbox">
+                <span>正誤色を入れ替える</span>
+                <span class="judgeColorSample" aria-hidden="true">
+                  <span class="judgeColorChip judgeColorChipCorrect">○</span>
+                  <span class="judgeColorChip judgeColorChipWrong">✕</span>
+                </span>
+              </label>
             </div>
           </div>
         </div>
@@ -178,6 +187,7 @@
                 </button>
               </div>
             </div>
+            <div class="modalSubsectionTitle">プレイヤーソート</div>
             <div class="row">
               <label>
                 Controller並び
@@ -229,13 +239,26 @@
 
       <div class="overlayPanel" id="modsSettingPanel" hidden>
         <div class="row">
-          <div>MOD選択<div>
+          <div>MOD選択</div>
           <select id="modSelect"></select>
           <button id="modApply">Apply</button>
           <button id="modReset">Reset</button>
         </div>
       </div>
-    </div>
+
+      <div class="overlayPanel" id="helpPanel" hidden>
+        <h2>ヘルプ</h2>
+        <div class="modalSection">
+          <div class="modalSectionTitle">キーバインド</div>
+          <div class="modalSectionBody helpList">
+            <div class="helpItem"><span class="helpKey">q</span><span class="helpDesc">出題</span></div>
+            <div class="helpItem"><span class="helpKey">r</span><span class="helpDesc">リセット</span></div>
+            <div class="helpItem"><span class="helpKey">t</span><span class="helpDesc">長考</span></div>
+            <div class="helpItem"><span class="helpKey">o</span><span class="helpDesc">正解</span></div>
+            <div class="helpItem"><span class="helpKey">x</span><span class="helpDesc">誤答 / スルー（誰も押していない時）</span></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>    
 
@@ -245,9 +268,13 @@
         <button id="openRules" class="iconBtn" title="ルール"><i class="fa-solid fa-clipboard-list"></i></button>
         <button id="openVisualSettings" class="iconBtn" title="表示設定"><i class="fa-solid fa-display"></i></button>
         <button id="openSettings" class="iconBtn" title="設定"><i class="fa-solid fa-gear"></i></button>
+        <button id="openHelp" class="iconBtn" title="ヘルプ"><i class="fa-solid fa-circle-question"></i></button>
         <button id="openModsSettings" class="iconBtn" title="MOD"><i class="fa-solid fa-puzzle-piece"></i></button>
         <button id="toggleJoinQrTop" class="iconBtn" title="QRコード表示"><i class="fa-solid fa-qrcode"></i></button>
-        <button id="acReset" class="iconBtn iconBtnDanger topToolsSpacer" title="AC">AC</button>
+        <button id="toggleModScoreboard" class="iconBtn topToolsSpacer" title="得点板を表示"><i class="fa-solid fa-table-cells-large"></i></button>
+        <button id="toggleScoreHidden" class="iconBtn" title="得点を非表示"><span class="iconBtnLabel">？</span></button>
+        <button id="toggleTitleScreen" class="iconBtn" title="蓋画を表示"><span class="iconBtnLabel">蓋</span></button>
+        <button id="acReset" class="iconBtn iconBtnDanger" title="AC">AC</button>
       </div>
 
       <div id="controllerRoot" class="mainTop">
@@ -256,17 +283,15 @@
           <div class="progressMainButtons">
             <label class="qnoInline">
               <span>Q</span>
-              <input id="qno" type="number" min="0" step="1" value="1">
+              <input id="qno" type="number" min="0" step="1" value="0">
             </label>
+            <button id="buzzerReset">リセット</button>
             <button id="present">出題</button>
             <button id="skip">スルー</button>
             <button id="thinking">長考</button>
             <span class="progressDivider" aria-hidden="true"></span>
             <button id="correct">正解</button>
             <button id="wrong" class="spacedAfterCorrect">誤答</button>
-          </div>
-          <div class="progressResetWrap">
-            <button id="buzzerReset">リセット</button>
           </div>
         </div>
         </div>
