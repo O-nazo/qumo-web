@@ -1,4 +1,3 @@
-import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,14 +10,48 @@ const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv"]);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function resolveAssetsDir() {
+  const portableBase = process.env.PORTABLE_EXECUTABLE_DIR;
+  const portableAssetsDir = portableBase
+    ? path.join(portableBase, "mods", modId, "assets")
+    : null;
+  const localAssetsDir = path.join(__dirname, "../assets");
+
+  if (portableAssetsDir && fs.existsSync(portableAssetsDir)) {
+    return portableAssetsDir;
+  }
+  return localAssetsDir;
+}
+
+function writeDiag(message, meta = null) {
+  try {
+    const baseDir =
+      process.env.PORTABLE_EXECUTABLE_DIR ||
+      (process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null) ||
+      process.cwd();
+    const logPath = path.join(baseDir, "qumo-diagnostics.log");
+    const line = `[${new Date().toISOString()}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}\n`;
+    fs.appendFileSync(logPath, line, "utf8");
+  } catch {}
+}
+
 export default function registerVisualQuiz(ctx) {
   /** --------------------
    * static assets
    * ------------------- */
-  const assetsDir = path.join(__dirname, "../assets");
+  const assetsDir = resolveAssetsDir();
   const base = `/mods/${modId}/assets`;
+  writeDiag("visual_quiz assets", {
+    portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR || null,
+    portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || null,
+    cwd: process.cwd(),
+    __dirname,
+    assetsDir,
+    qRootDir: path.join(assetsDir, "q"),
+    qRootExists: fs.existsSync(path.join(assetsDir, "q"))
+  });
 
-  ctx.app.use(base, express.static(assetsDir));
+  ctx.app.use(base, ctx.express.static(assetsDir));
   console.log("[visual_quiz] static mounted:", base);
 
   /** --------------------

@@ -1,6 +1,8 @@
 export function createClient({ screen, name, autoJoin = true }) {
   const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
   const ws = new WebSocket(wsUrl);
+  const CLOCK_SYNC_BURST_DELAYS_MS = [0, 80, 160];
+  const CLOCK_SYNC_INTERVAL_MS = 5000;
 
   let state = null;
   const stateListeners = new Set();
@@ -45,6 +47,8 @@ export function createClient({ screen, name, autoJoin = true }) {
   // --- 追加：時刻同期（任意。後でサーバ側と合わせる用）---
   let clockOffsetMs = 0;
   let bestRtt = Infinity;
+  let pingIntervalId = null;
+  let pingTimeoutIds = [];
 
   function nowEpochMs() {
     return performance.timeOrigin + performance.now();
@@ -53,9 +57,49 @@ export function createClient({ screen, name, autoJoin = true }) {
     return nowEpochMs() + clockOffsetMs;
   }
 
+  function getClockSyncStats() {
+    return {
+      clockOffsetMs,
+      bestRtt: Number.isFinite(bestRtt) ? bestRtt : null
+    };
+  }
+
   function sendPing() {
     const t0 = nowEpochMs();
     sendOrQueue({ type: "PING", t0 });
+  }
+
+  function clearClockSyncTimers() {
+    if (pingIntervalId != null) {
+      clearInterval(pingIntervalId);
+      pingIntervalId = null;
+    }
+    for (const timeoutId of pingTimeoutIds) {
+      clearTimeout(timeoutId);
+    }
+    pingTimeoutIds = [];
+  }
+
+  function scheduleClockSyncBurst() {
+    for (const delayMs of CLOCK_SYNC_BURST_DELAYS_MS) {
+      if (delayMs === 0) {
+        sendPing();
+        continue;
+      }
+      const timeoutId = setTimeout(() => {
+        pingTimeoutIds = pingTimeoutIds.filter((id) => id !== timeoutId);
+        sendPing();
+      }, delayMs);
+      pingTimeoutIds.push(timeoutId);
+    }
+  }
+
+  function startClockSync() {
+    clearClockSyncTimers();
+    scheduleClockSyncBurst();
+    pingIntervalId = setInterval(() => {
+      scheduleClockSyncBurst();
+    }, CLOCK_SYNC_INTERVAL_MS);
   }
 
   function onState(fn) {
@@ -80,11 +124,7 @@ export function createClient({ screen, name, autoJoin = true }) {
 
   ws.addEventListener("open", () => {
     flushQueue();
-
-    // ついでに軽く時刻同期（3回だけ）
-    sendPing();
-    setTimeout(sendPing, 80);
-    setTimeout(sendPing, 160);
+    startClockSync();
 
     if (autoJoin) join({ name });
   });
@@ -146,6 +186,10 @@ ws.addEventListener("open", () => console.log("[WS] open"));
 ws.addEventListener("close", (e) => console.log("[WS] close", e.code, e.reason));
 ws.addEventListener("error", (e) => console.log("[WS] error", e));
 
+ws.addEventListener("close", () => {
+  clearClockSyncTimers();
+});
 
-  return { ws, onState, onSelf, onMessage, send, emit, join, nowServerMs };
+
+  return { ws, onState, onSelf, onMessage, send, emit, join, nowServerMs, getClockSyncStats };
 }

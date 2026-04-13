@@ -10,15 +10,67 @@ const path = require("path");
 const QRCode = require("qrcode");
 
 const TUNNEL_FILE = path.resolve(process.cwd(), ".tunnel-url");
-const CONFIG_DIR = path.resolve(process.cwd(), "config");
+const TUNNEL_MODE_FILE = path.resolve(process.cwd(), ".tunnel-mode");
+const TUNNEL_POLL_MS = 500;
+const LAN_URL_FALLBACK_DELAY_MS = 8000;
+const TUNNEL_MODE_TUNNEL = "tunnel";
+const TUNNEL_MODE_LAN = "lan";
 
 let cachedTunnelUrl = null;
 let tunnelPollTimer = null;
 let cleanupRegistered = false;
+let tunnelWatchStartedAt = 0;
 const WRONG_CHAIN_DELAY_MS = 900;
+const BUZZ_COLLECTION_WINDOW_MS = 20;
+const RTT_SKEW_MIN_MS = 30;
+const RTT_SKEW_MAX_MS = 200;
+const RTT_SKEW_BUFFER_MS = 10;
+const FALLBACK_SKEW_MS = 120;
+
+function getExternalBaseDir() {
+  const candidates = [
+    process.env.PORTABLE_EXECUTABLE_DIR,
+    process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null,
+    process.cwd(),
+    path.dirname(process.execPath)
+  ].filter(Boolean);
+
+  return candidates[0];
+}
+
+function getConfigDirCandidates() {
+  return {
+    devDir: path.resolve(process.cwd(), "config"),
+    exeSide: path.join(getExternalBaseDir(), "config"),
+    resourcesSide: process.resourcesPath
+      ? path.join(process.resourcesPath, "config")
+      : null
+  };
+}
+
+function getPreferredConfigDir() {
+  const isPackaged = process.env.QUMO_PACKAGED === "1";
+  const { devDir, exeSide } = getConfigDirCandidates();
+  return isPackaged ? exeSide : devDir;
+}
+
+function getConfigLookupDirs() {
+  const isPackaged = process.env.QUMO_PACKAGED === "1";
+  const { devDir, exeSide, resourcesSide } = getConfigDirCandidates();
+  return isPackaged
+    ? [exeSide, resourcesSide, devDir]
+    : [devDir];
+}
 
 function genId(len) {
   return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
+}
+
+function getAdaptiveSkewMs(bestRtt) {
+  const rtt = Number(bestRtt);
+  if (!Number.isFinite(rtt) || rtt < 0) return FALLBACK_SKEW_MS;
+  const adaptive = rtt / 2 + RTT_SKEW_BUFFER_MS;
+  return Math.max(RTT_SKEW_MIN_MS, Math.min(RTT_SKEW_MAX_MS, adaptive));
 }
 
 function emitSfx(st, key, extra = {}) {
@@ -259,10 +311,22 @@ function safeUnlink(p) {
   try { fs.unlinkSync(p); } catch {}
 }
 
+function writeTunnelModeFile(lanModeEnabled) {
+  const mode = lanModeEnabled ? TUNNEL_MODE_LAN : TUNNEL_MODE_TUNNEL;
+  try {
+    fs.writeFileSync(TUNNEL_MODE_FILE, mode, "utf8");
+  } catch {}
+}
+
+function isValidJoinUrl(value) {
+  const raw = String(value || "").trim();
+  return /^https?:\/\//i.test(raw);
+}
+
 function readTunnelUrlIfReady() {
   try {
     const u = fs.readFileSync(TUNNEL_FILE, "utf8").trim();
-    if (u.startsWith("https://") && u.includes(".trycloudflare.com")) return u;
+    if (isValidJoinUrl(u)) return u;
   } catch {}
   return null;
 }
@@ -271,16 +335,37 @@ function readTunnelUrl() {
 try {
   const p = path.resolve(process.cwd(), ".tunnel-url");
   const u = fs.readFileSync(p, "utf8").trim();
-  return u.startsWith("https://") ? u : null;
+  return isValidJoinUrl(u) ? u : null;
 } catch {
   return null;
 }
 }
 
+function getLanJoinUrl(st) {
+  const candidates = Array.isArray(st?.joinUrls) ? st.joinUrls : [];
+  return candidates.find((url) => /^http:\/\/(?!localhost\b)/i.test(String(url || "").trim())) || null;
+}
+
+function getPreferredJoinUrl(st) {
+  if (st?.ui?.lanModeEnabled) {
+    return getLanJoinUrl(st);
+  }
+
+  const tunnelUrl = cachedTunnelUrl || readTunnelUrl();
+  if (isValidJoinUrl(tunnelUrl)) return tunnelUrl;
+
+  const shouldUseLanFallback =
+    tunnelWatchStartedAt > 0 &&
+    (Date.now() - tunnelWatchStartedAt) >= LAN_URL_FALLBACK_DELAY_MS;
+  if (!shouldUseLanFallback) return null;
+
+  return getLanJoinUrl(st);
+}
+
 function refreshJoinQrState(st, onDone = null) {
   st.ui = st.ui || {};
 
-  const targetUrl = cachedTunnelUrl || readTunnelUrl();
+  const targetUrl = getPreferredJoinUrl(st);
   st.ui.joinQrTargetUrl = targetUrl || null;
 
   if (!st.ui.joinQrVisible || !targetUrl) {
@@ -311,7 +396,7 @@ function refreshJoinQrState(st, onDone = null) {
 }
 
 function ensureConfigDir() {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(getPreferredConfigDir(), { recursive: true });
 }
 
 function formatPresetTimestamp(date = new Date()) {
@@ -329,12 +414,18 @@ function formatPresetTimestamp(date = new Date()) {
 
 function listPresetFiles() {
   ensureConfigDir();
-  return fs.readdirSync(CONFIG_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => /\.json$/i.test(name))
-    .sort((a, b) => a.localeCompare(b, "ja"))
-    .reverse();
+  const names = new Set();
+
+  for (const dir of getConfigLookupDirs()) {
+    if (!dir || !fs.existsSync(dir)) continue;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!/\.json$/i.test(entry.name)) continue;
+      names.add(entry.name);
+    }
+  }
+
+  return Array.from(names).sort((a, b) => a.localeCompare(b, "ja")).reverse();
 }
 
 function updatePresetList(st) {
@@ -345,7 +436,7 @@ function updatePresetList(st) {
 function exportCurrentPresetFile(st) {
   ensureConfigDir();
   const fileName = `Rules_${formatPresetTimestamp()}.json`;
-  const filePath = path.join(CONFIG_DIR, fileName);
+  const filePath = path.join(getPreferredConfigDir(), fileName);
   const payload = {
     savedAt: new Date().toISOString(),
     rules: sanitizePersistedPrefs({ rules: st.rules, ui: {} }).rules,
@@ -373,7 +464,7 @@ function sanitizePresetFileName(rawName) {
 function exportNamedPresetFile(st, rawName) {
   ensureConfigDir();
   const fileName = sanitizePresetFileName(rawName);
-  const filePath = path.join(CONFIG_DIR, fileName);
+  const filePath = path.join(getPreferredConfigDir(), fileName);
   const payload = {
     savedAt: new Date().toISOString(),
     rules: sanitizePersistedPrefs({ rules: st.rules, ui: {} }).rules,
@@ -391,9 +482,15 @@ function loadPresetFile(fileName) {
     throw new Error("プリセット名が不正です");
   }
 
-  const filePath = path.join(CONFIG_DIR, safeName);
-  const raw = fs.readFileSync(filePath, "utf8");
-  return sanitizePersistedPrefs(JSON.parse(raw));
+  for (const dir of getConfigLookupDirs()) {
+    if (!dir) continue;
+    const filePath = path.join(dir, safeName);
+    if (!fs.existsSync(filePath)) continue;
+    const raw = fs.readFileSync(filePath, "utf8");
+    return sanitizePersistedPrefs(JSON.parse(raw));
+  }
+
+  throw new Error("プリセットが見つかりません");
 }
 
 function normalizePresetMatchKey(value) {
@@ -432,6 +529,7 @@ function createWsServer(httpServer) {
   let autoNextTimer = null;
   let wrongAdvanceTimer = null;
   let autoResetTimer = null;
+  let buzzCollectTimer = null;
 
   function clearWrongAdvanceTimer() {
     if (!wrongAdvanceTimer) return;
@@ -445,8 +543,48 @@ function createWsServer(httpServer) {
     autoResetTimer = null;
   }
 
+  function clearBuzzCollectTimer() {
+    if (!buzzCollectTimer) return;
+    clearTimeout(buzzCollectTimer);
+    buzzCollectTimer = null;
+  }
+
   function clearPendingAutoReset() {
     clearAutoResetTimer();
+  }
+
+  function clearPendingBuzzCollection(st = null) {
+    clearBuzzCollectTimer();
+    if (st?.buzzer) {
+      st.buzzer.collectUntil = null;
+    }
+  }
+
+  function finalizeBuzzCollection(expectedSeq = null) {
+    buzzCollectTimer = null;
+    const st = getState();
+    if (!st?.buzzer?.isOpen) {
+      clearPendingBuzzCollection(st);
+      return;
+    }
+    if (st.phase === "result" || st.judge?.status === "result" || st.judge?.status === "in_progress") {
+      clearPendingBuzzCollection(st);
+      return;
+    }
+    if (expectedSeq != null && Number(st.buzzer?.collectSeq ?? 0) !== Number(expectedSeq)) {
+      return;
+    }
+
+    st.buzzer.collectUntil = null;
+    const nextIdx = pickNextRespondentIndex(st);
+    if (nextIdx >= 0) {
+      st.phase = "locked";
+      st.judge.status = "in_progress";
+      st.judge.currentIndex = nextIdx;
+      st.judge.lastResult = null;
+      emitSfx(st, "buzzer");
+    }
+    broadcastState();
   }
 
   function performAutoReset(st) {
@@ -529,6 +667,7 @@ function createWsServer(httpServer) {
     if (st.ui.showMarkWrong == null) st.ui.showMarkWrong = true;
 
     if (st.ui.joinQrVisible == null) st.ui.joinQrVisible = false;
+    if (st.ui.lanModeEnabled == null) st.ui.lanModeEnabled = false;
     if (st.ui.joinQrTargetUrl == null) st.ui.joinQrTargetUrl = null;
     if (st.ui.joinQrDataUrl == null) st.ui.joinQrDataUrl = null;
     if (st.titleScreenVisible == null) st.titleScreenVisible = false;
@@ -551,6 +690,7 @@ function createWsServer(httpServer) {
 
   ensureInitialized();
   refreshJoinQrState(getState());
+  writeTunnelModeFile(!!getState()?.ui?.lanModeEnabled);
 
    // 1) 起動時に前回の .tunnel-url を消す（これが一番効く）
   safeUnlink(TUNNEL_FILE);
@@ -567,18 +707,31 @@ function createWsServer(httpServer) {
   // 3) .tunnel-url ができるまでチェックし、見つかったら1回だけSTATE更新
   function startTunnelUrlWatch() {
     if (tunnelPollTimer) return;
+    tunnelWatchStartedAt = Date.now();
     tunnelPollTimer = setInterval(() => {
+      const st = getState();
       const u = readTunnelUrlIfReady();
-      if (!u) return;
-
-      if (u !== cachedTunnelUrl) {
-        cachedTunnelUrl = u;
-        refreshJoinQrState(getState(), broadcastState); // ここで controller に即反映させる
+      const nextUrl = isValidJoinUrl(u) ? u : getPreferredJoinUrl(st);
+      if (nextUrl !== cachedTunnelUrl) {
+        cachedTunnelUrl = nextUrl;
+        refreshJoinQrState(st, broadcastState);
+        return;
       }
 
-      clearInterval(tunnelPollTimer);
-      tunnelPollTimer = null;
-    }, 200);
+      if (!u && cachedTunnelUrl == null && (Date.now() - tunnelWatchStartedAt) >= LAN_URL_FALLBACK_DELAY_MS) {
+        const lanUrl = getLanJoinUrl(st);
+        if (lanUrl && lanUrl !== cachedTunnelUrl) {
+          cachedTunnelUrl = lanUrl;
+          refreshJoinQrState(st, broadcastState);
+        }
+        return;
+      }
+
+      if (u && u !== cachedTunnelUrl) {
+        cachedTunnelUrl = u;
+        refreshJoinQrState(st, broadcastState); // ここで controller に即反映させる
+      }
+    }, TUNNEL_POLL_MS);
   }
   startTunnelUrlWatch();
 
@@ -606,7 +759,7 @@ function createWsServer(httpServer) {
   function broadcastState() {
     ensureInitialized();
     const st = snapshot();
-    st.publicBaseUrl = cachedTunnelUrl; // 追加
+    st.publicBaseUrl = getPreferredJoinUrl(st);
     broadcast({ type: S2C.STATE, state: st });
   }
 
@@ -933,6 +1086,7 @@ function createWsServer(httpServer) {
           if (prevProfile !== nextProfile) {
             clearWrongAdvanceTimer();
             clearPendingAutoReset();
+            clearPendingBuzzCollection(st);
             resetAllPlayersForRule(st);
             resetBuzzer(st);
             resetJudge(st);
@@ -958,10 +1112,11 @@ function createWsServer(httpServer) {
           return;
         }
 
-        if (type === C2S.BUZZER_OPEN) {
+      if (type === C2S.BUZZER_OPEN) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
         clearPendingAutoReset();
+        clearPendingBuzzCollection(st);
         st.titleScreenVisible = false;
         if (st.judge?.status === "result" || st.phase === "result") {
           if (shouldApplyPendingOutcomeOnReset(st)) applyPendingJudgeOutcome(st);
@@ -981,6 +1136,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
         clearPendingAutoReset();
+        clearPendingBuzzCollection(st);
         st.titleScreenVisible = false;
         settleResetState(st);
         ensureBoardAnswerState(st);
@@ -995,6 +1151,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
         clearPendingAutoReset();
+        clearPendingBuzzCollection(st);
         st.titleScreenVisible = false;
 
         // 追加: 自動遷移の予約があればキャンセル（手動が優先）
@@ -1350,6 +1507,7 @@ function createWsServer(httpServer) {
 
       if (type === C2S.JUDGE_SKIP) {
         if (ws.meta.screen !== "controller") return;
+        clearPendingBuzzCollection(st);
 
         emitMod("JUDGE_SKIP", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
         emitSfx(st, "skip");
@@ -1506,6 +1664,22 @@ function createWsServer(httpServer) {
         return;
       }
 
+      if (type === "SET_LAN_MODE") {
+        if (ws.meta.screen !== "controller") return;
+
+        st.ui = st.ui || {};
+        st.ui.lanModeEnabled = !!msg.enabled;
+        writeTunnelModeFile(st.ui.lanModeEnabled);
+        cachedTunnelUrl = st.ui.lanModeEnabled ? getLanJoinUrl(st) : null;
+        tunnelWatchStartedAt = Date.now();
+        if (!st.ui.lanModeEnabled) {
+          safeUnlink(TUNNEL_FILE);
+        }
+        persistControllerPrefs(st);
+        refreshJoinQrState(st, broadcastState);
+        return;
+      }
+
       if (type === "LIST_RULE_PRESETS") {
         if (ws.meta.screen !== "controller") return;
         updatePresetList(st);
@@ -1564,6 +1738,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
         clearPendingAutoReset();
+        clearPendingBuzzCollection(st);
 
         for (const p of Object.values(st.players || {})) {
           resetPlayerProgressForRule(st, p);
@@ -1640,11 +1815,11 @@ function createWsServer(httpServer) {
         // 受信時刻
         const recvAt = Date.now();
 
-        // 押下時刻（クライアント同梱があれば採用。ただしズレが大きい時は無視）
+        // 押下時刻は、端末の同期品質に応じた許容幅に収まる時だけ採用する
         let at = recvAt;
         const tPress = Number(msg.tPress ?? msg.at);
-        const MAX_SKEW_MS = 500;
-        if (Number.isFinite(tPress) && Math.abs(tPress - recvAt) <= MAX_SKEW_MS) at = tPress;
+        const adaptiveSkewMs = getAdaptiveSkewMs(msg.bestRtt);
+        if (Number.isFinite(tPress) && Math.abs(tPress - recvAt) <= adaptiveSkewMs) at = tPress;
 
         // ★重複ガードは「push前」
         // 同一問で同じ人が2回以上押すのは無視（多重発火・連打対策）
@@ -1688,13 +1863,13 @@ function createWsServer(httpServer) {
           existsUnwrongedPlayer;
 
         if (willStartResponding) {
-          const nextIdx = pickNextRespondentIndex(st);
-          if (nextIdx >= 0) {
-            st.phase = "locked";
-            st.judge.status = "in_progress";
-            st.judge.currentIndex = nextIdx;
-            st.judge.lastResult = null;
-            emitSfx(st, "buzzer");
+          if (!buzzCollectTimer) {
+            st.buzzer.collectSeq = Number(st.buzzer.collectSeq ?? 0) + 1;
+            st.buzzer.collectUntil = recvAt + BUZZ_COLLECTION_WINDOW_MS;
+            const collectSeq = st.buzzer.collectSeq;
+            buzzCollectTimer = setTimeout(() => {
+              finalizeBuzzCollection(collectSeq);
+            }, BUZZ_COLLECTION_WINDOW_MS);
           }
 
           broadcastState();
@@ -1716,6 +1891,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
         clearPendingAutoReset();
+        clearPendingBuzzCollection(st);
 
         const modIdRaw = String(msg.modId || "").trim();
         const prevActive = String(st.mods?.active || "").trim();
@@ -1821,6 +1997,7 @@ function createWsServer(httpServer) {
         if (action.type === "CORE_COMMAND") {
           const command = String(action.command || "").trim();
           if (command === "JUDGE_SKIP") {
+            clearPendingBuzzCollection(st);
             emitMod("JUDGE_SKIP", { by: "mod_dispatch", at: Date.now() });
             emitSfx(st, "skip");
             setResult(st, { type: "skip" });

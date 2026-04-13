@@ -237,6 +237,7 @@ const els = {
   displayQualifyPlayerCount: document.querySelector("#displayQualifyPlayerCount"),
   displayDisqualifiedPlayerCount: document.querySelector("#displayDisqualifiedPlayerCount"),
   joinUrls: document.querySelector("#joinUrls"),
+  lanModeEnabled: document.querySelector("#lanModeEnabled"),
   toggleJoinQr: document.querySelector("#toggleJoinQr"),
   playersGrid: document.querySelector("#playersGrid"),
   restPenalty: document.querySelector("#restPenalty"),
@@ -734,13 +735,16 @@ function renderJoinUrls(st) {
   if (!els.joinUrls) return;
 
   const base = st?.publicBaseUrl;
+  const lanModeEnabled = !!st?.ui?.lanModeEnabled;
 
   els.joinUrls.innerHTML = "";
 
   if (!base) {
-    els.joinUrls.textContent = "トンネルURL取得中…（cloudflared起動待ち）";
+    els.joinUrls.textContent = lanModeEnabled
+      ? "LAN URL 準備中…"
+      : "トンネルURL取得中…（cloudflared起動待ち）";
   }else{
-    els.joinUrls.textContent = base;
+    els.joinUrls.textContent = lanModeEnabled ? `${base} (LAN)` : base;
     return;
   }
 
@@ -845,10 +849,17 @@ function emitAutoNextSettings() {
   });
 }
 
+function emitLanModeSetting() {
+  client.emit("SET_LAN_MODE", {
+    enabled: !!els.lanModeEnabled?.checked
+  });
+}
+
 els.autoResetEnabled?.addEventListener("change", emitAutoNextSettings);
 els.autoResetDelayMs?.addEventListener("change", emitAutoNextSettings);
 els.autoNextEnabled?.addEventListener("change", emitAutoNextSettings);
 els.autoNextDelayMs?.addEventListener("change", emitAutoNextSettings);
+els.lanModeEnabled?.addEventListener("change", emitLanModeSetting);
 els.exportRulePreset?.addEventListener("click", () => {
   client.send({
     type: "EXPORT_RULE_PRESET",
@@ -1557,6 +1568,7 @@ client.onState((st) => {
   if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDelayMs ?? 800);
   if (els.autoResetEnabled) els.autoResetEnabled.checked = !!st.rules?.autoResetEnabled;
   if (els.autoResetDelayMs) els.autoResetDelayMs.value = Number(st.rules?.autoResetDelayMs ?? 1500);
+  if (els.lanModeEnabled) els.lanModeEnabled.checked = !!st.ui?.lanModeEnabled;
   if (toggleTitleScreenBtn) {
     const on = st.titleScreenVisible === true;
     toggleTitleScreenBtn.dataset.on = on ? "1" : "0";

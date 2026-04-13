@@ -480,7 +480,10 @@ function handleBigBtn(e) {
 
   client.emit("BUZZ", {
     // サーバー側の期待キー：tPress（互換で at も受けるが統一）
-    tPress: (typeof client.nowServerMs === "function") ? client.nowServerMs() : Date.now()
+    tPress: (typeof client.nowServerMs === "function") ? client.nowServerMs() : Date.now(),
+    bestRtt: (typeof client.getClockSyncStats === "function")
+      ? client.getClockSyncStats()?.bestRtt
+      : null
   });
 }
 
@@ -584,10 +587,11 @@ function formatPointRank(pr, scoreHidden) {
       if (wrongSet[pid]) continue;
 
       const p = st.players?.[pid];
+      const status = String(p?.status || "active");
       const rest = Number(p?.restCount ?? 0);
       if (rest > 0) continue;
-      if (p?.dq) continue;
-      if (p?.qualified) continue;
+      if (status === "disqualified") continue;
+      if (status === "qualified") continue;
 
       return pid;
     }
@@ -750,7 +754,7 @@ function formatPointRank(pr, scoreHidden) {
 
   // 点灯
   const nextPid =
-    (buzzMode === "endless" && st.judge?.status === "in_progress")
+    (buzzMode === "endless" && st.phase !== "result" && st.judge?.status !== "result")
       ? nextEligiblePlayerId(st, sorted)
       : null;
 

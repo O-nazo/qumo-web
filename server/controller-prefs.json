@@ -50,6 +50,7 @@
     "showMarkCorrect": true,
     "showMarkWrong": true,
     "joinQrVisible": false,
+    "lanModeEnabled": false,
     "rulesOverlayVisible": false,
     "boardAnswerEnabled": false,
     "boardAnswerVisible": false,

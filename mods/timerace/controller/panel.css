@@ -13,14 +13,14 @@
 
 @font-face {
   font-family: "DSEG7Classic";
-  src: url("/assets/font/DSEG7Classic-BoldItalic.woff") format("woff");
+  src: url("/font/DSEG7Classic-BoldItalic.woff") format("woff");
   font-style: italic;
   font-weight: 700;
 }
 
 @font-face {
   font-family: "DSEG14Classic";
-  src: url("/assets/font/DSEG14Classic-Bold.ttf") format("truetype");
+  src: url("/font/DSEG14Classic-Bold.ttf") format("truetype");
   font-style: normal;
   font-weight: 700;
 }

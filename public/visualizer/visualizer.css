@@ -8,7 +8,7 @@ body {
 
 @font-face {
   font-family: "Makinas";
-  src: url("/assets/font/MAKINAS-4-SQUARE.OTF") format("opentype");
+  src: url("/font/MAKINAS-4-SQUARE.OTF") format("opentype");
   font-display: swap;
 }
 

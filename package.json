@@ -1,6 +1,6 @@
 {
   "name": "qumo-web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "main": "electron/main.js",
 
@@ -8,7 +8,7 @@
     "start": "electron .",
     "intro-workbench": "node tools/intro-quiz-workbench/server.js",
 
-    "tunnel": "node tools/run-tunnel.js",
+    "tunnel": "node server/run-tunnel.js",
 
     "dev": "concurrently --kill-others --kill-signal SIGINT -n app,tunnel -c auto \"npm:start\" \"npm:tunnel\"",
 
@@ -27,7 +27,8 @@
       "electron/**",
       "server/**",
       "public/**",
-      "tools/**",
+      "!tools/**",
+      "!QUMO_web_LOGO.af",
       "package.json"
     ],
 
@@ -37,16 +38,30 @@
         "to": "assets"
       },
       {
+        "from": "mods",
+        "to": "mods"
+      },
+      {
+        "from": "config",
+        "to": "config"
+      },
+      {
         "from": "bin/cloudflared.exe",
         "to": "bin/cloudflared.exe"
       }
     ],
 
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
       ]
+    },
+
+    "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
 
     "directories": {

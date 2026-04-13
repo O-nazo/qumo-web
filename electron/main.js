@@ -2,8 +2,20 @@ const { app, BrowserWindow, screen } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const port = 37344
 const windowStateFile = () => path.join(app.getPath("userData"), "window-state.json");
+
+function getExternalBaseDir() {
+  const candidates = [
+    process.env.PORTABLE_EXECUTABLE_DIR,
+    process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null,
+    process.cwd(),
+    path.dirname(process.execPath)
+  ].filter(Boolean);
+
+  return candidates[0];
+}
 
 process.env.QUMO_PACKAGED = app.isPackaged ? "1" : "0";
 
@@ -84,8 +96,14 @@ async function startServer() {
 }
 
 function startTunnelWriteFile(port) {
-  const exeSide = path.join(path.dirname(process.execPath), "bin", "cloudflared.exe");
+  const exeSide = path.join(getExternalBaseDir(), "bin", "cloudflared.exe");
   const cmd = fs.existsSync(exeSide) ? exeSide : "cloudflared";
+  const TUNNEL_BOOT_TIMEOUT_MS = 8000;
+  const MAX_TUNNEL_RETRIES = 2;
+  const MODE_FILE = path.resolve(process.cwd(), ".tunnel-mode");
+  const MODE_POLL_MS = 1000;
+  const MODE_TUNNEL = "tunnel";
+  const MODE_LAN = "lan";
 
   const localUrl = `http://localhost:${port}`;
   const args = ["tunnel", "--url", localUrl, "--loglevel", "info"];
@@ -94,21 +112,82 @@ function startTunnelWriteFile(port) {
   const tunnelFile = path.resolve(process.cwd(), ".tunnel-url");
 
   let current = "";
+  let currentChild = null;
+  let bootTimer = null;
+  let retryCount = 0;
+  let modePollTimer = null;
+  let desiredMode = MODE_TUNNEL;
 
-  const p = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  function readDesiredMode() {
+    try {
+      const mode = String(fs.readFileSync(MODE_FILE, "utf8") || "").trim().toLowerCase();
+      return mode === MODE_LAN ? MODE_LAN : MODE_TUNNEL;
+    } catch {
+      return MODE_TUNNEL;
+    }
+  }
+
+  function getLanUrl() {
+    const nets = os.networkInterfaces();
+    for (const entries of Object.values(nets)) {
+      for (const net of entries || []) {
+        if (net?.family === "IPv4" && !net.internal) {
+          return `http://${net.address}:${port}`;
+        }
+      }
+    }
+    return localUrl;
+  }
+
+  function writeJoinUrl(url) {
+    if (!url || url === current) return;
+    current = url;
+    fs.writeFileSync(tunnelFile, current, "utf8");
+  }
+
+  function clearBootTimer() {
+    if (!bootTimer) return;
+    clearTimeout(bootTimer);
+    bootTimer = null;
+  }
+
+  function stopChild() {
+    if (!currentChild) return;
+    try { currentChild.kill("SIGINT"); } catch {}
+    currentChild = null;
+  }
+
+  function fallbackToLan() {
+    clearBootTimer();
+    stopChild();
+    writeJoinUrl(getLanUrl());
+  }
+
+  function scheduleRetry() {
+    if (desiredMode !== MODE_TUNNEL) return;
+    clearBootTimer();
+    stopChild();
+    if (retryCount >= MAX_TUNNEL_RETRIES) {
+      fallbackToLan();
+      return;
+    }
+    retryCount += 1;
+    startTunnel();
+  }
 
   function onLine(line) {
     const m = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
-    if (m && m[0] !== current) {
-      current = m[0];
-      fs.writeFileSync(tunnelFile, current, "utf8");
+    if (m) {
+      clearBootTimer();
+      retryCount = 0;
+      writeJoinUrl(m[0]);
       // これで wsServer.js の監視が拾って broadcastState() します
     }
   }
 
-  for (const s of [p.stdout, p.stderr]) {
+  function bindStream(stream) {
     let buf = "";
-    s.on("data", (d) => {
+    stream.on("data", (d) => {
       buf += d.toString("utf8");
       const lines = buf.split(/\r?\n/);
       buf = lines.pop() ?? "";
@@ -116,8 +195,63 @@ function startTunnelWriteFile(port) {
     });
   }
 
+  function startTunnel() {
+    if (desiredMode !== MODE_TUNNEL || currentChild) return;
+    currentChild = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    bindStream(currentChild.stdout);
+    bindStream(currentChild.stderr);
+
+    currentChild.on("error", () => {
+      scheduleRetry();
+    });
+
+    currentChild.on("exit", () => {
+      currentChild = null;
+      if (desiredMode !== MODE_TUNNEL) {
+        clearBootTimer();
+        return;
+      }
+      if (bootTimer) {
+        scheduleRetry();
+        return;
+      }
+      scheduleRetry();
+    });
+
+    bootTimer = setTimeout(() => {
+      scheduleRetry();
+    }, TUNNEL_BOOT_TIMEOUT_MS);
+  }
+
+  function applyDesiredMode(mode) {
+    desiredMode = mode;
+    if (desiredMode === MODE_LAN) {
+      fallbackToLan();
+      return;
+    }
+
+    current = "";
+    try { fs.unlinkSync(tunnelFile); } catch {}
+    clearBootTimer();
+    stopChild();
+    startTunnel();
+  }
+
+  function startModeWatcher() {
+    applyDesiredMode(readDesiredMode());
+    modePollTimer = setInterval(() => {
+      const nextMode = readDesiredMode();
+      if (nextMode === desiredMode) return;
+      applyDesiredMode(nextMode);
+    }, MODE_POLL_MS);
+  }
+
+  startModeWatcher();
+
   app.on("before-quit", () => {
-    try { p.kill("SIGINT"); } catch {}
+    if (modePollTimer) clearInterval(modePollTimer);
+    clearBootTimer();
+    stopChild();
   });
 }
 
