@@ -8,27 +8,6 @@ const fs = require("fs");
 const { createModRuntime } = require("./modRuntime");
 const { setModRuntime } = require("./modRuntimeHub");
 
-function getExternalBaseDir() {
-  const candidates = [
-    process.env.PORTABLE_EXECUTABLE_DIR,
-    process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null,
-    process.cwd(),
-    path.dirname(process.execPath)
-  ].filter(Boolean);
-
-  return candidates[0];
-}
-
-function writeDiag(message, meta = null) {
-  try {
-    const baseDir = getExternalBaseDir();
-    if (!baseDir) return;
-    const logPath = path.join(baseDir, "qumo-diagnostics.log");
-    const line = `[${new Date().toISOString()}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}\n`;
-    fs.appendFileSync(logPath, line, "utf8");
-  } catch {}
-}
-
 function getLocalIPv4s() {
   const nets = os.networkInterfaces();
   const ips = [];
@@ -159,20 +138,6 @@ const externalAssetsDir = getExternalAssetsDir();
 const externalModsDir = getExternalModsDir();
 const runtimeModsDir = getRuntimeModsDir();
 console.log("[SFX] isPackaged=", process.env.QUMO_PACKAGED, "externalSfxDir=", externalSfxDir);
-writeDiag("server paths", {
-  isPackaged: process.env.QUMO_PACKAGED,
-  portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR || null,
-  portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || null,
-  cwd: process.cwd(),
-  execPath: process.execPath,
-  processExecDir: path.dirname(process.execPath),
-  externalBaseDir: getExternalBaseDir(),
-  externalSfxDir,
-  externalAssetsDir,
-  externalModsDir,
-  runtimeModsDir,
-  resourcesPath: process.resourcesPath || null
-});
 
 async function start({ port }) {
   const app = express();

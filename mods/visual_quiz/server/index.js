@@ -23,33 +23,12 @@ function resolveAssetsDir() {
   return localAssetsDir;
 }
 
-function writeDiag(message, meta = null) {
-  try {
-    const baseDir =
-      process.env.PORTABLE_EXECUTABLE_DIR ||
-      (process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null) ||
-      process.cwd();
-    const logPath = path.join(baseDir, "qumo-diagnostics.log");
-    const line = `[${new Date().toISOString()}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}\n`;
-    fs.appendFileSync(logPath, line, "utf8");
-  } catch {}
-}
-
 export default function registerVisualQuiz(ctx) {
   /** --------------------
    * static assets
    * ------------------- */
   const assetsDir = resolveAssetsDir();
   const base = `/mods/${modId}/assets`;
-  writeDiag("visual_quiz assets", {
-    portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR || null,
-    portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || null,
-    cwd: process.cwd(),
-    __dirname,
-    assetsDir,
-    qRootDir: path.join(assetsDir, "q"),
-    qRootExists: fs.existsSync(path.join(assetsDir, "q"))
-  });
 
   ctx.app.use(base, ctx.express.static(assetsDir));
   console.log("[visual_quiz] static mounted:", base);

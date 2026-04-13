@@ -22,32 +22,10 @@ function resolveAssetsDir() {
   return localAssetsDir;
 }
 
-function writeDiag(message, meta = null) {
-  try {
-    const baseDir =
-      process.env.PORTABLE_EXECUTABLE_DIR ||
-      (process.env.PORTABLE_EXECUTABLE_FILE ? path.dirname(process.env.PORTABLE_EXECUTABLE_FILE) : null) ||
-      process.cwd();
-    const logPath = path.join(baseDir, "qumo-diagnostics.log");
-    const line = `[${new Date().toISOString()}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}\n`;
-    fs.appendFileSync(logPath, line, "utf8");
-  } catch {}
-}
-
 function registerIntroQuiz(ctx) {
   const assetsDir = resolveAssetsDir();
   const setsDir = path.join(assetsDir, "sets");
   const base = `/mods/${modId}/assets`;
-
-  writeDiag("intro_quiz assets", {
-    portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR || null,
-    portableExecutableFile: process.env.PORTABLE_EXECUTABLE_FILE || null,
-    cwd: process.cwd(),
-    __dirname,
-    assetsDir,
-    setsDir,
-    setsDirExists: fs.existsSync(setsDir)
-  });
 
   ctx.app.use(base, ctx.express.static(assetsDir));
 
