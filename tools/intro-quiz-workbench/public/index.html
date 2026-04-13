@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Intro Quiz Workbench</title>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Intro Quiz Workbench</p>
+        <h1>CSV作成を、再生しながら終わらせる</h1>
+        <p class="lead">プレイリストから問題を起こして、YouTubeを見ながら Intro / サビ秒数をワンクリックで記録できます。</p>
+      </div>
+      <div class="heroActions">
+        <label class="fileButton">
+          CSVを開く
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
+        </label>
+        <button id="exportButton" class="primary">CSVを書き出す</button>
+      </div>
+    </header>
+
+    <section class="panel generatePanel">
+      <div class="panelHeader">
+        <h2>1. プレイリストから生成</h2>
+        <span id="statusText" class="status"></span>
+      </div>
+      <div class="row">
+        <input id="playlistUrlInput" type="text" placeholder="https://music.youtube.com/playlist?list=..." />
+        <button id="generateButton" class="primary">生成</button>
+      </div>
+      <p class="hint">YouTube / YouTube Music のプレイリストURLから `title / artist / path` を起こします。YouTube Music のときは `year` も拾えることがあります。</p>
+    </section>
+
+    <section class="panel generatePanel">
+      <div class="panelHeader">
+        <h2>保存先</h2>
+        <span id="saveStatusText" class="status"></span>
+      </div>
+      <div class="row">
+        <input id="savePathInput" type="text" placeholder="E:\\Project\\git\\qumo-web\\mods\\intro_quiz\\assets\\sets\\新セット.csv" />
+        <button id="openByPathButton">パスから開く</button>
+        <button id="enableAutosaveButton" class="primary">自動保存を有効化</button>
+      </div>
+      <p class="hint">ここで指定したCSVパスに、編集のたび自動で上書き保存します。ブラウザの「CSVを開く」で読み込んだだけでは元ファイルへ自動保存できません。</p>
+    </section>
+
+    <main class="workspace">
+      <section class="panel queuePanel">
+        <div class="panelHeader">
+          <h2>2. 秒数を打つ</h2>
+          <div class="miniActions">
+            <button id="prevButton">前へ</button>
+            <button id="nextButton">次へ</button>
+          </div>
+        </div>
+
+        <div id="emptyState" class="emptyState">
+          CSVを読み込むか、プレイリストから生成するとここに編集画面が出ます。
+        </div>
+
+        <div id="editorArea" class="editorArea hidden">
+          <div class="nowCard">
+            <div class="metaLine">
+              <span id="counterText" class="badge">0 / 0</span>
+              <span id="videoTypeBadge" class="badge subtle">-</span>
+            </div>
+            <h3 id="songTitle">-</h3>
+            <p id="songArtist" class="artistText"></p>
+          </div>
+
+          <div class="playerShell">
+            <div id="playerFrame" class="playerFrame"></div>
+            <div id="playerFallback" class="playerFallback hidden">
+              <p>この行はYouTube URLではないため、内蔵プレイヤーでは再生できません。</p>
+              <a id="openPathLink" href="#" target="_blank" rel="noreferrer">ソースを開く</a>
+            </div>
+          </div>
+
+          <div class="transport">
+            <button id="playButton" class="primary">再生 / 一時停止</button>
+            <button id="back5Button">-5秒</button>
+            <button id="forward5Button">+5秒</button>
+            <button id="previewIntroButton">Introを確認</button>
+            <button id="previewChorusButton">サビを確認</button>
+            <button id="setIntroButton">現在位置をIntroに</button>
+            <button id="setChorusButton">現在位置をサビに</button>
+            <span id="timeText" class="timeText">0.0 sec</span>
+          </div>
+
+          <div class="fieldGrid">
+            <label>
+              <span>ID</span>
+              <input id="fieldId" type="text" />
+            </label>
+            <label>
+              <span>Title</span>
+              <input id="fieldTitle" type="text" />
+            </label>
+            <label>
+              <span>Artist</span>
+              <input id="fieldArtist" type="text" />
+            </label>
+            <label>
+              <span>Year</span>
+              <input id="fieldYear" type="text" />
+            </label>
+            <label class="wide">
+              <span>Note</span>
+              <input id="fieldNote" type="text" />
+            </label>
+            <label class="wide">
+              <span>Path</span>
+              <input id="fieldPath" type="text" />
+            </label>
+            <label>
+              <span>Intro</span>
+              <input id="fieldStartAt" type="number" min="0" step="0.1" />
+            </label>
+            <label>
+              <span>サビ</span>
+              <input id="fieldChorusAt" type="number" min="0" step="0.1" />
+            </label>
+          </div>
+
+          <div class="linkRow">
+            <a id="youtubeSearchLink" href="#" target="_blank" rel="noreferrer">YouTube検索</a>
+            <a id="wikipediaSearchLink" href="#" target="_blank" rel="noreferrer">Wikipedia検索</a>
+            <a id="openCurrentPathLink" href="#" target="_blank" rel="noreferrer">現在のURLを開く</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel listPanel">
+        <div class="panelHeader">
+          <h2>3. 一覧確認</h2>
+          <button id="renumberButton">ID振り直し</button>
+        </div>
+        <div id="tableWrap" class="tableWrap"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
+

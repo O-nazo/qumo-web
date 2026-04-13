@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="./main.css" />
+</head>
+<body>
+  <div id="stage">
+    <div class="chrome"></div>
+    <div class="panel">
+      <div class="topRow">
+        <div id="mediaStage" class="mediaStage">
+          <div id="mediaPlaceholder" class="mediaPlaceholder">
+            <canvas id="staticCanvas" class="staticCanvas"></canvas>
+            <div class="scanlineLayer"></div>
+            <div class="staticGlow"></div>
+          </div>
+          <div id="mediaOverlay" class="mediaOverlay">
+            <div id="overlayJudge" class="overlayPane overlayJudge hidden">
+              <div id="overlayJudgeMark" class="overlayJudgeMark"></div>
+            </div>
+            <div id="overlayThinking" class="overlayPane overlayThinking hidden">
+              <div id="overlayThinkingCountdown" class="overlayThinkingCountdown"></div>
+            </div>
+          </div>
+          <div id="questionMark" class="questionMark">Q</div>
+          <video id="videoPlayer" preload="auto" playsinline hidden></video>
+          <div id="youtubeWrap" class="frameWrap" hidden>
+            <div id="youtubePlayer"></div>
+          </div>
+        </div>
+        <div class="metaColumn">
+          <div class="trackMeta">
+            <div id="answerMeta" class="answerMeta hidden">
+              <div class="answerMetaLabel">Answer&gt;&gt;</div>
+              <div id="answerMetaName" class="answerMetaName"></div>
+            </div>
+            <div id="title" class="trackTitle metaHidden">Song Title</div>
+            <div id="artist" class="trackArtist metaHidden">Artist</div>
+            <div id="year" class="trackMetaSub metaHidden"></div>
+            <div id="note" class="trackMetaSub metaHidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="playerHud" aria-hidden="true">
+        <div class="playerHudInner">
+          <div class="playerHudSide">
+            <span class="playerHudIcon">⇄</span>
+            <span class="playerHudIcon">⏮</span>
+          </div>
+          <div class="playerHudStatus">
+            <span id="playerStatusIcon" class="playerHudStatusIcon">■</span>
+            <span id="playerStatusText" class="playerHudStatusText">Waiting</span>
+          </div>
+          <div class="playerHudSide playerHudSideRight">
+            <span class="playerHudIcon">⏭</span>
+            <span class="playerHudIcon">↻</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="waveWrap">
+        <div class="wave"></div>
+        <div class="wave wave2"></div>
+        <div class="wave wave3"></div>
+      </div>
+
+      <audio id="audioPlayer" preload="auto"></audio>
+    </div>
+  </div>
+
+  <script src="./main.js"></script>
+</body>
+</html>

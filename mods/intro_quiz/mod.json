@@ -1,6 +1,6 @@
 {
-  "id": "visual_quiz",
-  "name": "SprintVision",
+  "id": "intro_quiz",
+  "name": "IntroQuiz",
   "version": "0.1.0",
   "compatibleCore": "^0.1.0",
   "entry": {
@@ -15,7 +15,7 @@
     "publicDir": "assets"
   },
   "uiDefaults": {
-    "backgroundDarkTheme": true,
-    "playerTileDarkTheme": true
+    "backgroundDarkTheme": false,
+    "playerTileDarkTheme": false
   }
 }

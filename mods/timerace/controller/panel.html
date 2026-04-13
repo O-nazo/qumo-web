@@ -9,35 +9,202 @@
 <body>
   <div class="wrap">
     <section class="card hero">
-      <div class="eyebrow">Time Race</div>
-      <div id="phaseText" class="phaseText">待機中</div>
-      <div id="clock" class="clock">01:00:00</div>
-      <div id="summary" class="summary">残り 0 / 0</div>
-    </section>
-
-    <section class="card controls">
-      <div class="field">
-        <span>タイマー時間</span>
-        <div class="timeInputs">
-          <label class="timeField">
-            <span>分</span>
-            <input id="durationMin" type="number" min="0" max="59" step="1" value="1" />
-          </label>
-          <label class="timeField">
-            <span>秒</span>
-            <input id="durationSec" type="number" min="0" max="59" step="1" value="0" />
-          </label>
-        </div>
-      </div>
-
-      <div class="buttonRow">
+      <div class="buttonRow heroButtonRow">
+        <button id="btnPass">パス[SPACE]</button>
         <button id="btnStart" class="primary">スタート</button>
         <button id="btnStop">ストップ</button>
         <button id="btnReset" class="danger">リセット</button>
       </div>
+
+      <div id="phaseText" class="phaseText">待機中</div>
+      <div id="clock" class="clock">01:00:00</div>
+      <div class="statsRow">
+        <div class="remainBlock">
+          <div class="remainLabel">REMAIN</div>
+          <div class="remainValueWrap">
+            <div id="remainingValue" class="remainingValue">00</div>
+            <div id="remainingUnit" class="remainingUnit"></div>
+          </div>
+        </div>
+
+        <div id="passBlock" class="remainBlock passBlock" hidden>
+          <div class="remainLabel">PASS</div>
+          <div class="remainValueWrap passValueWrap">
+            <div id="passValue" class="remainingValue">10</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <div class="compactRow">
+        <label class="compactField compactField-select">
+          <span class="fieldLabelRow">
+            <span>条件</span>
+            <small id="goalHint" class="inlineHint">0で参加者全員</small>
+          </span>
+          <select id="goalMode">
+            <option value="survivor">勝ち抜けノルマ</option>
+            <option value="correct_count">正解数ノルマ</option>
+            <option value="timer_only">ノルマなし</option>
+          </select>
+        </label>
+
+        <label id="goalCountField" class="compactField compactField-number">
+          <span>ノルマ</span>
+          <input id="goalCount" type="number" min="0" max="9999" step="1" value="0" />
+        </label>
+      </div>
+
+      <div class="compactRow penaltyRow">
+        <label class="compactCheck">
+          <input id="wrongPenaltyEnabled" type="checkbox" />
+          <span>誤答ペナルティ</span>
+        </label>
+
+        <label class="compactField compactField-penalty">
+          <span>&nbsp;</span>
+          <div class="timeInputs">
+            <input id="wrongPenaltySec" type="number" min="1" max="999" step="1" value="10" />
+            <span>秒</span>
+          </div>
+        </label>
+
+        <label class="compactCheck compactCheck-pass">
+          <input id="passEnabled" type="checkbox" />
+          <span>パス</span>
+        </label>
+
+        <label class="compactField compactField-pass">
+          <span>&nbsp;</span>
+          <div class="timeInputs">
+            <input id="passCount" type="number" min="0" max="999" step="1" value="10" />
+            <span>回</span>
+          </div>
+        </label>
+      </div>
+
+      <div class="compactRow">
+        <label class="compactField compactField-displayMode">
+          <span>ミリ秒表示</span>
+          <select id="displayFractionDigits">
+            <option value="2">2桁</option>
+            <option value="1">1桁</option>
+            <option value="0">なし</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="compactRow compactRow-settings">
+        <div class="compactField compactField-countdownGroup">
+          <span>開始カウント</span>
+          <div class="timeGroupInputs">
+            <label class="compactField compactField-penalty">
+              <div class="timeInputs">
+                <input id="countdownSec" type="number" min="0" max="999" step="1" value="10" />
+                <span>秒</span>
+              </div>
+            </label>
+
+            <label class="compactField compactField-millis">
+              <div class="timeInputs">
+                <input id="countdownMillis" type="number" min="0" max="999" step="1" value="0" />
+                <span>ms</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="compactField compactField-timeGroup">
+          <div class="timeRowLabel">
+            <span>時間</span>
+            <small class="inlineHint">00:00でカウントアップ</small>
+          </div>
+
+          <div class="timeGroupInputs">
+            <label class="compactField compactField-time">
+              <div class="timeInputs">
+                <input id="durationMin" type="number" min="0" max="59" step="1" value="1" />
+                <span>分</span>
+              </div>
+            </label>
+
+            <label class="compactField compactField-time">
+              <div class="timeInputs">
+                <input id="durationSec" type="number" min="0" max="59" step="1" value="0" />
+                <span>秒</span>
+              </div>
+            </label>
+
+            <div class="compactField compactField-apply compactField-applyInline">
+              <button id="btnApplyDuration" type="button">適用</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <div class="sectionTitle">タイム隠し</div>
+      <div class="compactRow compactRow-display">
+        <div class="compactField compactField-hideGroup">
+          <span>タイム隠し開始</span>
+          <div class="timeGroupInputs">
+            <label class="compactField compactField-time">
+              <div class="timeInputs">
+                <input id="timeHideMin" type="number" min="0" max="999" step="1" value="0" />
+                <span>分</span>
+              </div>
+            </label>
+
+            <label class="compactField compactField-time">
+              <div class="timeInputs">
+                <input id="timeHideSec" type="number" min="0" max="59" step="1" value="30" />
+                <span>秒</span>
+              </div>
+            </label>
+
+            <label class="compactField compactField-millis">
+              <div class="timeInputs">
+                <input id="timeHideMillis" type="number" min="0" max="999" step="1" value="0" />
+                <span>ms</span>
+              </div>
+            </label>
+
+            <div class="compactField compactField-open">
+              <button id="btnOpenHiddenTime" type="button">?オープン</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="compactRow compactRow-mask">
+        <span class="maskLabel">隠す桁</span>
+
+        <label class="compactCheck compactCheck-inline">
+          <input id="timeHideMinute" type="checkbox" />
+          <span>分</span>
+        </label>
+
+        <label class="compactCheck compactCheck-inline">
+          <input id="timeHideSecondTens" type="checkbox" />
+          <span>10秒</span>
+        </label>
+
+        <label class="compactCheck compactCheck-inline">
+          <input id="timeHideSecondOnes" type="checkbox" />
+          <span>1秒</span>
+        </label>
+
+        <label class="compactCheck compactCheck-inline">
+          <input id="timeHideFraction" type="checkbox" />
+          <span>ミリ秒</span>
+        </label>
+      </div>
     </section>
   </div>
 
+  <script src="/common/numberInputWheel.js"></script>
   <script src="./panel.js"></script>
 </body>
 </html>

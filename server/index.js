@@ -31,6 +31,31 @@ function listMods() {
     .filter(name => fs.existsSync(path.join(modsDir, name, "mod.json")));
 }
 
+function readModMeta(modId) {
+  try {
+    const modJsonPath = path.join(process.cwd(), "mods", modId, "mod.json");
+    const raw = JSON.parse(fs.readFileSync(modJsonPath, "utf8"));
+    const defaults = raw?.uiDefaults && typeof raw.uiDefaults === "object" ? raw.uiDefaults : {};
+    return {
+      id: String(raw?.id || modId),
+      name: String(raw?.name || modId),
+      uiDefaults: {
+        backgroundDarkTheme: !!defaults.backgroundDarkTheme,
+        playerTileDarkTheme: !!defaults.playerTileDarkTheme
+      }
+    };
+  } catch {
+    return {
+      id: modId,
+      name: modId,
+      uiDefaults: {
+        backgroundDarkTheme: false,
+        playerTileDarkTheme: false
+      }
+    };
+  }
+}
+
 function pickFirstExistingDir(candidates) {
   for (const dir of candidates) {
     if (dir && fs.existsSync(dir)) return dir;
@@ -115,7 +140,17 @@ async function start({ port }) {
   const st0 = getState();
   st0.mods = st0.mods || {};
   st0.mods.available = listMods();
+  st0.mods.meta = Object.fromEntries(st0.mods.available.map((modId) => [modId, readModMeta(modId)]));
   if (st0.mods.active == null) st0.mods.active = null;
+  st0.ui = st0.ui || {};
+  st0.ui.modThemePrefs = st0.ui.modThemePrefs || {};
+  for (const modId of st0.mods.available) {
+    const defaults = st0.mods.meta?.[modId]?.uiDefaults || {};
+    st0.ui.modThemePrefs[modId] = {
+      backgroundDarkTheme: st0.ui.modThemePrefs[modId]?.backgroundDarkTheme ?? !!defaults.backgroundDarkTheme,
+      playerTileDarkTheme: st0.ui.modThemePrefs[modId]?.playerTileDarkTheme ?? !!defaults.playerTileDarkTheme
+    };
+  }
 
   const ws = createWsServer(server);
 

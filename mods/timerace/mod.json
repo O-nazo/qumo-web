@@ -13,5 +13,9 @@
   },
   "assets": {
     "publicDir": "assets"
+  },
+  "uiDefaults": {
+    "backgroundDarkTheme": true,
+    "playerTileDarkTheme": true
   }
 }

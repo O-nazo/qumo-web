@@ -2,6 +2,8 @@ const crypto = require("crypto");
 const { C2S, S2C } = require("./protocol");
 const { getState, snapshot, persistControllerPrefs, createDefaultControllerPrefs, sanitizePersistedPrefs, applyControllerPrefs } = require("./stateStore");
 const { getModRuntime, setCoreApi } = require("./modRuntimeHub");
+const { createBuzzLogic } = require("./buzzLogic");
+const { createRuleRegistry } = require("./rules/registry");
 
 const fs = require("fs");
 const path = require("path");
@@ -17,46 +19,6 @@ const WRONG_CHAIN_DELAY_MS = 900;
 
 function genId(len) {
   return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
-}
-
-function resetBuzzer(st) {
-  // 早稲田式：基本は常時受付（結果表示中だけ閉じる）
-  st.buzzer.isOpen = true;
-  st.buzzer.openedAt = Date.now();
-  st.buzzer.firstBuzz = null;
-  st.buzzer.buzzOrder = [];
-
-  // 追加：先着確定の収集ウィンドウ
-  st.buzzer.collectSeq = 0;
-  st.buzzer.collectUntil = null;
-}
-
-function resetJudge(st) {
-  st.judge.status = "idle";
-  st.judge.currentIndex = 0;
-  st.judge.wrongSet = {};
-  st.judge.lastResult = null;
-}
-
-function getBuzzMode(st) {
-  const m = String(st.rules?.buzzMode ?? "").toLowerCase();
-  if (m === "cultq" || m === "cult" || m === "cartq") return "cultq";
-  if (m === "single") return "single";
-  if (m === "endless" || m === "all") return "endless";
-  return "endless"; // デフォ
-}
-
-function pickNextRespondentIndex(st) {
-  const wrongSet = st.judge?.wrongSet || {};
-  const order = st.buzzer?.buzzOrder || [];
-  for (let i = 0; i < order.length; i++) {
-    const id = order[i]?.playerId;
-    if (!id) continue;
-    if (wrongSet[id]) continue;
-    if (!canBuzzNow(st, id)) continue;
-    return i;
-  }
-  return -1;
 }
 
 function emitSfx(st, key, extra = {}) {
@@ -81,12 +43,29 @@ function clearModScoreboardVisible(st) {
   return true;
 }
 
+function ensureModThemePrefs(st) {
+  st.mods = st.mods || {};
+  st.ui = st.ui || {};
+  st.ui.modThemePrefs = st.ui.modThemePrefs || {};
+  const available = Array.isArray(st.mods.available) ? st.mods.available : [];
+  const meta = st.mods.meta && typeof st.mods.meta === "object" ? st.mods.meta : {};
+  for (const modId of available) {
+    const defaults = meta[modId]?.uiDefaults || {};
+    st.ui.modThemePrefs[modId] = {
+      backgroundDarkTheme: st.ui.modThemePrefs[modId]?.backgroundDarkTheme ?? !!defaults.backgroundDarkTheme,
+      playerTileDarkTheme: st.ui.modThemePrefs[modId]?.playerTileDarkTheme ?? !!defaults.playerTileDarkTheme
+    };
+  }
+}
+
 
 function clampInt(n, min, max, fallback = 0) {
   const x = Number(n);
   if (!Number.isFinite(x)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(x)));
 }
+
+const ruleRegistry = createRuleRegistry({ clampInt });
 
 function normalizePlayerIdForSort(id) {
   const raw = String(id ?? "");
@@ -199,186 +178,81 @@ function updateHiddenScoreRankSortOrderSnapshot(st) {
 }
 
 function recomputeScores(st) {
-  const cp = clampInt(st.rules?.correctPoints, -1000, 1000000, 1);
-  const wp = clampInt(st.rules?.wrongPoints, -1000, 1000000, -1);
-
-  for (const p of Object.values(st.players || {})) {
-    const c = clampInt(p.correctCount, 0, 1000000, 0);
-    const w = clampInt(p.wrongCount, 0, 1000000, 0);
-    p.correctCount = c;
-    p.wrongCount = w;
-    p.score = c * cp + w * wp;
-  }
+  ruleRegistry.getActiveRuleDefinition(st).handlers.recomputeScores(st);
 }
 
 function recomputePlayerStatuses(st) {
-  const rules = st.rules || {};
+  ruleRegistry.getActiveRuleDefinition(st).handlers.recomputePlayerStatuses(st);
+}
 
-  const qualifyEnabled = !!rules.qualifyEnabled;
-  const dqEnabled = !!rules.dqEnabled;
-  const qualifyScore = clampInt(rules.qualifyScore, -1000, 1000000, 4);
-  const dqScore = clampInt(rules.dqScore, -1000, 1000000, -3);
+function getActiveRuleDefinition(st) {
+  return ruleRegistry.getActiveRuleDefinition(st);
+}
 
-  const qualifyCountEnabled = !!rules.qualifyCountEnabled;
-  const qualifyCorrectCount = clampInt(rules.qualifyCorrectCount, 0, 1000000, 4);
+function resetPlayerProgressForRule(st, player) {
+  if (!player) return;
+  player.correctCount = 0;
+  player.wrongCount = 0;
+  player.score = 0;
+  player.manualScoreAdjust = 0;
+  player.forceDisqualify = false;
+  player.restCount = 0;
+  player.pendingRestAdd = 0;
+  player.qualifiedAt = null;
+  player.dqAt = null;
+  player.passRank = null;
+  player.status = "active";
+  player.reach = { qualify: false, dq: false };
+  getActiveRuleDefinition(st).handlers.initializePlayer?.(player, st.rules || {});
+}
 
-  const dqWrongEnabled = !!rules.dqWrongEnabled;
-  const dqWrongCount = clampInt(rules.dqWrongCount, 0, 1000000, 3);
-
-  const cp = clampInt(rules.correctPoints, -1000, 1000000, 1);
-  const wp = clampInt(rules.wrongPoints, -1000, 1000000, -1);
-
-  // 1) qualifiedAt / dqAt の付与・解除
-  for (const p of Object.values(st.players || {})) {
-    const score = Number(p.score ?? 0);
-    const correctCount = Number(p.correctCount ?? 0);
-    const wrongCount = Number(p.wrongCount ?? 0);
-
-    const isQualify =
-      (qualifyEnabled && score >= qualifyScore) ||
-      (qualifyCountEnabled && correctCount >= qualifyCorrectCount);
-
-    const isDq =
-      (dqEnabled && score <= dqScore) ||
-      (dqWrongEnabled && wrongCount >= dqWrongCount);
-
-    // 同時成立は失格優先
-    if (isDq) {
-      if (!p.dqAt) p.dqAt = Date.now();
-      p.qualifiedAt = null;
-    } else {
-      p.dqAt = null;
-      if (isQualify) {
-        if (!p.qualifiedAt) p.qualifiedAt = Date.now();
-      } else {
-        p.qualifiedAt = null;
-      }
-    }
-  }
-
-  // 2) 勝ち抜け順位
-  const qualified = Object.values(st.players || {})
-    .filter(p => p.qualifiedAt)
-    .sort((a, b) => a.qualifiedAt - b.qualifiedAt);
-
-  qualified.forEach((p, idx) => { p.passRank = idx + 1; });
-  for (const p of Object.values(st.players || {})) {
-    if (!p.qualifiedAt) p.passRank = null;
-  }
-
-  // 3) status と reach
-  const qualifyReachEnabled = !!rules.qualifyReachEnabled;
-  const dqReachEnabled = !!rules.dqReachEnabled;
-
-  for (const p of Object.values(st.players || {})) {
-    const score = Number(p.score ?? 0);
-    const correctCount = Number(p.correctCount ?? 0);
-    const wrongCount = Number(p.wrongCount ?? 0);
-
-    const isQualified = !!p.qualifiedAt;
-    const isDisqualified = !!p.dqAt;
-
-    if (isDisqualified) p.status = "disqualified";
-    else if (isQualified) p.status = "qualified";
-    else p.status = "active";
-
-    p.reach = { qualify: false, dq: false };
-
-    if (p.status === "active") {
-      if (qualifyEnabled && qualifyReachEnabled) {
-        if (score + cp >= qualifyScore) p.reach.qualify = true;
-      }
-      if (qualifyCountEnabled && qualifyReachEnabled) {
-        if (correctCount + 1 >= qualifyCorrectCount) p.reach.qualify = true;
-      }
-
-      if (dqEnabled && dqReachEnabled) {
-        if (score + wp <= dqScore) p.reach.dq = true;
-      }
-      if (dqWrongEnabled && dqReachEnabled) {
-        if (wrongCount + 1 >= dqWrongCount) p.reach.dq = true;
-      }
-    }
+function resetAllPlayersForRule(st) {
+  for (const player of Object.values(st.players || {})) {
+    resetPlayerProgressForRule(st, player);
   }
 }
 
-function recomputeFirstBuzz(st) {
-  const first = st.buzzer.buzzOrder[0] ?? null;
-  st.buzzer.firstBuzz = first ? { playerId: first.playerId, at: first.at } : null;
-}
-
-function consumeRestForThisQuestion(st) {
-  // この問題で「休み状態だった人」だけ 1 消費（=restCount--）
-  for (const p of Object.values(st.players || {})) {
-    if (Number(p.restCount ?? 0) > 0) {
-      p.restCount = Math.max(0, Number(p.restCount) - 1);
-    }
+function queueJudgeOutcomes(st, outcomes) {
+  const entries = Array.isArray(outcomes) ? outcomes : [];
+  for (const entry of entries) {
+    const playerId = String(entry?.playerId || "").trim();
+    if (!playerId) continue;
+    addPendingJudgeOutcome(st, playerId, entry);
   }
 }
 
-function applyPendingRestForNextQuestion(st) {
-  // 次問開始時に pendingRestAdd を restCount に加算
-  for (const p of Object.values(st.players || {})) {
-    const add = Number(p.pendingRestAdd ?? 0);
-    if (add > 0) {
-      p.restCount = Number(p.restCount ?? 0) + add;
-      p.pendingRestAdd = 0;
-    }
+function buildJudgeOutcomes(st, resultType, playerId) {
+  const handlers = getActiveRuleDefinition(st).handlers || {};
+  if (resultType === "correct") {
+    return handlers.buildCorrectPendingOutcomes?.(st, playerId) || [{ playerId, correct: 1 }];
   }
+  if (resultType === "wrong") {
+    return handlers.buildWrongPendingOutcomes?.(st, playerId) || [{ playerId, wrong: 1 }];
+  }
+  return [];
 }
 
-function setResult(st, result) {
-  st.judge.status = "result";
-  st.judge.lastResult = result;
-  st.phase = "result";
-  st.buzzer.isOpen = false; // 結果確定時は受付停止
-
-  // 問題消化タイミングで休みを消費（誤答罰は pending なのでここでは減らない）
-  consumeRestForThisQuestion(st);
-}
-
-function startQuestion(st, { increment = false } = {}) {
-  if (increment) st.questionNo = Number(st.questionNo ?? 1) + 1;
-
-  // 次問開始：pending を restCount に反映
-  applyPendingRestForNextQuestion(st);
-
-  resetBuzzer(st);
-  resetJudge(st);
-
-  st.phase = "open";
-  st.buzzer.isOpen = true;
-  st.buzzer.openedAt = Date.now();
-}
-
-function hasAnyEligiblePlayer(st) {
-  const wrongSet = st.judge?.wrongSet || {};
-  return Object.values(st.players || {}).some((p) => {
-    const id = p.id;
-    if (!id) return false;
-    if (Number(p.restCount ?? 0) > 0) return false;
-    if (p.modDisabled) return false;
-    if (wrongSet[id]) return false;
-    const status = p.status || "active";
-    if (status === "qualified" || status === "disqualified") return false;
-    return true;
-  });
-}
-
-function getCurrentRespondent(st) {
-  if (st.judge.status !== "in_progress") return null;
-  return st.buzzer.buzzOrder[st.judge.currentIndex] ?? null;
-}
-
-function canBuzzNow(st, playerId) {
-  const p = st.players?.[playerId];
-  if (!p) return false;
-  if (Number(p.restCount ?? 0) > 0) return false; // 休み中は回答権なし
-  if (p.modDisabled) return false; // MODによる参加停止
-  if (st.judge?.wrongSet?.[playerId]) return false; // この問題で誤答した人は押せない
-  if (p.status === "qualified" || p.status === "disqualified") return false; // 勝ち抜けor失格は押せない
-  return true;
-}
+const {
+  addPendingJudgeOutcome,
+  applyPendingJudgeOutcome,
+  canBuzzNow,
+  clearPendingJudgeOutcome,
+  ensureJudgePendingOutcome,
+  getBuzzMode,
+  getCurrentRespondent,
+  hasAnyEligiblePlayer,
+  pickNextRespondentIndex,
+  recomputeFirstBuzz,
+  resetBuzzer,
+  resetJudge,
+  setResult,
+  settleResetState,
+  shouldApplyPendingOutcomeOnReset,
+  startQuestion
+} = createBuzzLogic({
+  recomputeScores,
+  recomputePlayerStatuses
+});
 
 /* URL関連 */
 function safeUnlink(p) {
@@ -458,7 +332,7 @@ function listPresetFiles() {
   return fs.readdirSync(CONFIG_DIR, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => /^Rules_\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.json$/i.test(name))
+    .filter((name) => /\.json$/i.test(name))
     .sort((a, b) => a.localeCompare(b, "ja"))
     .reverse();
 }
@@ -482,6 +356,34 @@ function exportCurrentPresetFile(st) {
   return fileName;
 }
 
+function sanitizePresetFileName(rawName) {
+  const trimmed = String(rawName || "").trim();
+  const fallbackBase = `Rules_${formatPresetTimestamp()}`;
+  const baseName = trimmed || fallbackBase;
+  const withoutExt = baseName.replace(/\.json$/i, "");
+  const sanitized = withoutExt
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/g, "");
+
+  return `${sanitized || fallbackBase}.json`;
+}
+
+function exportNamedPresetFile(st, rawName) {
+  ensureConfigDir();
+  const fileName = sanitizePresetFileName(rawName);
+  const filePath = path.join(CONFIG_DIR, fileName);
+  const payload = {
+    savedAt: new Date().toISOString(),
+    rules: sanitizePersistedPrefs({ rules: st.rules, ui: {} }).rules,
+    ui: sanitizePersistedPrefs({ rules: {}, ui: st.ui }).ui
+  };
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  updatePresetList(st);
+  return fileName;
+}
+
 function loadPresetFile(fileName) {
   ensureConfigDir();
   const safeName = path.basename(String(fileName || ""));
@@ -494,6 +396,32 @@ function loadPresetFile(fileName) {
   return sanitizePersistedPrefs(JSON.parse(raw));
 }
 
+function normalizePresetMatchKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\.json$/i, "")
+    .trim()
+    .toLocaleLowerCase("ja");
+}
+
+function findAutoPresetFileForMod(st, modId) {
+  const id = String(modId || "").trim();
+  if (!id) return null;
+
+  const modLabel = String(st?.mods?.meta?.[id]?.name || "").trim();
+  const keys = new Set(
+    [normalizePresetMatchKey(id), normalizePresetMatchKey(modLabel)].filter(Boolean)
+  );
+  if (keys.size === 0) return null;
+
+  for (const fileName of listPresetFiles()) {
+    if (keys.has(normalizePresetMatchKey(fileName))) {
+      return fileName;
+    }
+  }
+  return null;
+}
+
 function createWsServer(httpServer) {
   const { WebSocketServer } = require("ws");
   const wss = new WebSocketServer({ server: httpServer });
@@ -503,6 +431,7 @@ function createWsServer(httpServer) {
   // 早稲田式：問題進行はサーバーで自動化
   let autoNextTimer = null;
   let wrongAdvanceTimer = null;
+  let autoResetTimer = null;
 
   function clearWrongAdvanceTimer() {
     if (!wrongAdvanceTimer) return;
@@ -510,8 +439,39 @@ function createWsServer(httpServer) {
     wrongAdvanceTimer = null;
   }
 
+  function clearAutoResetTimer() {
+    if (!autoResetTimer) return;
+    clearTimeout(autoResetTimer);
+    autoResetTimer = null;
+  }
+
+  function clearPendingAutoReset() {
+    clearAutoResetTimer();
+  }
+
+  function performAutoReset(st) {
+    clearPendingAutoReset();
+    st.titleScreenVisible = false;
+    settleResetState(st);
+    emitMod("STATE_UPDATED", { at: Date.now() });
+    broadcastState();
+  }
+
+  function scheduleAutoReset(st) {
+    clearPendingAutoReset();
+    if (!st.rules?.autoResetEnabled) return;
+    const delayMs = clampInt(st.rules?.autoResetDelayMs, 0, 10000, 1500);
+    autoResetTimer = setTimeout(() => {
+      autoResetTimer = null;
+      const st2 = getState();
+      performAutoReset(st2);
+    }, delayMs);
+  }
+
   function scheduleNextQuestion() {
     const st = getState();
+
+    if (st.rules?.autoResetEnabled) return;
 
     // 追加: 自動遷移OFFなら何もしない
     if (!st.rules?.autoNextEnabled) return;
@@ -539,9 +499,14 @@ function createWsServer(httpServer) {
     if (!st.players) st.players = {};
     if (!st.buzzer) st.buzzer = {};
     if (!st.judge) st.judge = {};
+    if (!st.sfx) st.sfx = {};
+    if (st.rules.autoResetEnabled == null) st.rules.autoResetEnabled = false;
+    if (st.rules.autoResetDelayMs == null) st.rules.autoResetDelayMs = 1500;
     if (st.rules.autoNextEnabled == null) st.rules.autoNextEnabled = false; // デフォ: 手動
     if (st.rules.autoNextDelayMs == null) st.rules.autoNextDelayMs = 800;   // 自動ON時の待ち
+    ensureJudgePendingOutcome(st);
     if (!st.ui) st.ui = {};
+    if (!st.mods) st.mods = {};
     if (st.ui.showScore == null) st.ui.showScore = true;
     if (st.ui.showCorrectCount == null) st.ui.showCorrectCount = true;
     if (st.ui.showWrongCount == null) st.ui.showWrongCount = true;
@@ -552,6 +517,7 @@ function createWsServer(httpServer) {
     if (st.ui.playerTileLayout == null) st.ui.playerTileLayout = "grid";
     if (st.ui.prioritizePressedPlayers == null) st.ui.prioritizePressedPlayers = false;
     if (st.ui.swapJudgeColors == null) st.ui.swapJudgeColors = false;
+    if (st.ui.backgroundDarkTheme == null) st.ui.backgroundDarkTheme = false;
     if (st.ui.playerTileDarkTheme == null) st.ui.playerTileDarkTheme = false;
     if (st.ui.showVerticalScore == null) st.ui.showVerticalScore = true;
     if (st.ui.showVerticalCorrectCount == null) st.ui.showVerticalCorrectCount = true;
@@ -569,7 +535,9 @@ function createWsServer(httpServer) {
     if (st.titleScreenAutoShown == null) st.titleScreenAutoShown = false;
     if (st.modScoreboardVisible == null) st.modScoreboardVisible = false;
     if (st.scoreHiddenVisible == null) st.scoreHiddenVisible = false;
+    if (st.preModUiTheme == null) st.preModUiTheme = null;
     if (!Array.isArray(st.ui.hiddenScoreRankSortOrder)) st.ui.hiddenScoreRankSortOrder = [];
+    ensureModThemePrefs(st);
 
     if (st.questionNo == null) st.questionNo = 1;
     updatePresetList(st);
@@ -656,6 +624,74 @@ function createWsServer(httpServer) {
     return Math.max(-1000, Math.min(1000000, Math.trunc(x)));
   }
 
+  function clampAttackStartPoints(n) {
+    return clampInt(n, 1, 1000000, 20);
+  }
+
+  function clampAttackDelta(n) {
+    return clampInt(n, 1, 1000000, 1);
+  }
+
+  function clampUpDownGain(n) {
+    return clampInt(n, 1, 1000000, 1);
+  }
+
+  function clampUpDownGoal(n) {
+    return clampInt(n, 1, 1000000, 7);
+  }
+
+  function clampUpDownWrongLimit(n) {
+    return clampInt(n, 1, 1000000, 2);
+  }
+
+  function clampDisplayPlayerCount(n) {
+    return clampInt(n, 0, 1000000, 0);
+  }
+
+  function clampEditableScore(n, fallback = 0) {
+    return clampInt(n, -1000000, 1000000, fallback);
+  }
+
+  function applyRuleProfileConfigPatch(st, patch) {
+    if (!patch || typeof patch !== "object") return false;
+    let changed = false;
+
+    if (Object.prototype.hasOwnProperty.call(patch, "displayQualifyPlayerCount")) {
+      st.rules.displayQualifyPlayerCount = clampDisplayPlayerCount(patch.displayQualifyPlayerCount);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "displayDisqualifiedPlayerCount")) {
+      st.rules.displayDisqualifiedPlayerCount = clampDisplayPlayerCount(patch.displayDisqualifiedPlayerCount);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "attackStartPoints")) {
+      st.rules.attackStartPoints = clampAttackStartPoints(patch.attackStartPoints);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "attackCorrectDamage")) {
+      st.rules.attackCorrectDamage = clampAttackDelta(patch.attackCorrectDamage);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "attackWrongDamage")) {
+      st.rules.attackWrongDamage = clampAttackDelta(patch.attackWrongDamage);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "upDownCorrectGain")) {
+      st.rules.upDownCorrectGain = clampUpDownGain(patch.upDownCorrectGain);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "upDownQualifyScore")) {
+      st.rules.upDownQualifyScore = clampUpDownGoal(patch.upDownQualifyScore);
+      changed = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "upDownDqWrongCount")) {
+      st.rules.upDownDqWrongCount = clampUpDownWrongLimit(patch.upDownDqWrongCount);
+      changed = true;
+    }
+
+    return changed;
+  }
+
   function sanitizeName(raw) {
     let s = String(raw ?? "").trim();
     // 長さ制限（お好みで）
@@ -667,6 +703,64 @@ function createWsServer(httpServer) {
     // 空ならデフォルト
     if (!s) s = "Player";
     return s;
+  }
+
+  function ensureBoardAnswerState(st) {
+    st.boardAnswer = st.boardAnswer || {};
+    st.boardAnswer.enabled = !!st.boardAnswer.enabled;
+    st.boardAnswer.visibleOnVisualizer = !!st.boardAnswer.visibleOnVisualizer;
+    st.boardAnswer.responses = st.boardAnswer.responses && typeof st.boardAnswer.responses === "object"
+      ? st.boardAnswer.responses
+      : {};
+    st.boardAnswer.lastJudged = st.boardAnswer.lastJudged && typeof st.boardAnswer.lastJudged === "object"
+      ? st.boardAnswer.lastJudged
+      : null;
+  }
+
+  function sanitizeBoardAnswer(raw) {
+    return String(raw ?? "")
+      .replace(/\r\n/g, "\n")
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+      .split("\n")
+      .map((line) => line.trim())
+      .join("\n")
+      .trim()
+      .slice(0, 120);
+  }
+
+  function sanitizeBoardAnswerFlag(raw) {
+    const value = String(raw || "").toLowerCase();
+    return value === "correct" || value === "wrong" ? value : "";
+  }
+
+  function ensureBoardAnswerEntry(st, playerId) {
+    ensureBoardAnswerState(st);
+    const player = st.players?.[playerId];
+    if (!player) return null;
+
+    const existing = st.boardAnswer.responses[playerId];
+    if (existing && typeof existing === "object") {
+      existing.playerId = playerId;
+      existing.playerName = String(player.name || "");
+      existing.text = String(existing.text || "");
+      existing.flag = sanitizeBoardAnswerFlag(existing.flag);
+      existing.result = sanitizeBoardAnswerFlag(existing.result);
+      existing.submittedAt = Number(existing.submittedAt || 0) || null;
+      existing.updatedAt = Number(existing.updatedAt || 0) || null;
+      return existing;
+    }
+
+    const entry = {
+      playerId,
+      playerName: String(player.name || ""),
+      text: "",
+      flag: "",
+      result: "",
+      submittedAt: null,
+      updatedAt: null
+    };
+    st.boardAnswer.responses[playerId] = entry;
+    return entry;
   }
 
   function findPlayerByExactName(st, name) {
@@ -777,13 +871,9 @@ function createWsServer(httpServer) {
             st.players[playerId] = {
               id: playerId,
               name,
-              correctCount: 0,
-              wrongCount: 0,
-              score: 0,
-              restCount: 0,
-              pendingRestAdd: 0,
               connected: true
             };
+            resetPlayerProgressForRule(st, st.players[playerId]);
 
             normalizePlayerOrder(st);
             send(ws, { type: S2C.SELF, playerId });
@@ -808,8 +898,8 @@ function createWsServer(httpServer) {
       }
 
       // 早押しルール切替
-      if (type === (C2S.SET_BUZZ_MODE || "SET_BUZZ_MODE")) {
-        if (ws.meta.screen !== "controller") return;
+        if (type === (C2S.SET_BUZZ_MODE || "SET_BUZZ_MODE")) {
+          if (ws.meta.screen !== "controller") return;
 
         const mode = getBuzzMode({ rules: { buzzMode: msg.buzzMode } });
         st.rules.buzzMode = mode;
@@ -830,15 +920,55 @@ function createWsServer(httpServer) {
           }
         }
         
-        persistControllerPrefs(st);
-        broadcastState();
-        return;
-      }
+          persistControllerPrefs(st);
+          broadcastState();
+          return;
+        }
 
-      if (type === C2S.BUZZER_OPEN) {
+        if (type === (C2S.SET_RULE_PROFILE || "SET_RULE_PROFILE")) {
+          if (ws.meta.screen !== "controller") return;
+          const nextProfile = ruleRegistry.sanitizeRuleProfile(msg.ruleProfile || "standard");
+          const prevProfile = String(st.rules.ruleProfile || "standard");
+          st.rules.ruleProfile = nextProfile;
+          if (prevProfile !== nextProfile) {
+            clearWrongAdvanceTimer();
+            clearPendingAutoReset();
+            resetAllPlayersForRule(st);
+            resetBuzzer(st);
+            resetJudge(st);
+            st.phase = "lobby";
+            ensureBoardAnswerState(st);
+            st.boardAnswer.responses = {};
+            st.boardAnswer.lastJudged = null;
+          }
+          recomputeScores(st);
+          recomputePlayerStatuses(st);
+          persistControllerPrefs(st);
+          broadcastState();
+          return;
+        }
+
+        if (type === (C2S.SET_RULE_PROFILE_CONFIG || "SET_RULE_PROFILE_CONFIG")) {
+          if (ws.meta.screen !== "controller") return;
+          if (!applyRuleProfileConfigPatch(st, msg.config || {})) return;
+          recomputeScores(st);
+          recomputePlayerStatuses(st);
+          persistControllerPrefs(st);
+          broadcastState();
+          return;
+        }
+
+        if (type === C2S.BUZZER_OPEN) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        clearPendingAutoReset();
         st.titleScreenVisible = false;
+        if (st.judge?.status === "result" || st.phase === "result") {
+          if (shouldApplyPendingOutcomeOnReset(st)) applyPendingJudgeOutcome(st);
+          else clearPendingJudgeOutcome(st);
+        } else {
+          clearPendingJudgeOutcome(st);
+        }
         // 結果表示中なら次問へ、そうでなければ同じ問を受付再開
         updateRankSortOrderSnapshot(st);
         startQuestion(st, { increment: (st.judge?.status === "result" || st.phase === "result") });
@@ -850,10 +980,12 @@ function createWsServer(httpServer) {
       if (type === C2S.BUZZER_RESET) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        clearPendingAutoReset();
         st.titleScreenVisible = false;
-        resetBuzzer(st);
-        resetJudge(st);
-        st.phase = "open";
+        settleResetState(st);
+        ensureBoardAnswerState(st);
+        st.boardAnswer.responses = {};
+        st.boardAnswer.lastJudged = null;
         emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
@@ -862,6 +994,7 @@ function createWsServer(httpServer) {
       if (type === C2S.NEXT_QUESTION) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        clearPendingAutoReset();
         st.titleScreenVisible = false;
 
         // 追加: 自動遷移の予約があればキャンセル（手動が優先）
@@ -869,9 +1002,10 @@ function createWsServer(httpServer) {
           clearTimeout(autoNextTimer);
           autoNextTimer = null;
         }
+        clearPendingJudgeOutcome(st);
         emitMod("STATE_UPDATED", { at: Date.now() });
         updateRankSortOrderSnapshot(st);
-        startQuestion(st, { increment: true });
+        startQuestion(st, { increment: false });
         broadcastState();
         return;
       }
@@ -890,6 +1024,20 @@ function createWsServer(httpServer) {
         return;
       }
 
+      if (type === "SET_MOD_THEME_PREFS") {
+        if (ws.meta.screen !== "controller") return;
+        const modId = String(msg.modId || "").trim();
+        if (!modId || !st.mods?.available?.includes(modId)) return;
+        ensureModThemePrefs(st);
+        st.ui.modThemePrefs[modId] = {
+          backgroundDarkTheme: !!msg.backgroundDarkTheme,
+          playerTileDarkTheme: !!msg.playerTileDarkTheme
+        };
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
       if (type === "SET_SCORE_HIDDEN") {
         if (ws.meta.screen !== "controller") return;
         const nextVisible = !!msg.visible;
@@ -900,6 +1048,14 @@ function createWsServer(httpServer) {
           updateRankSortOrderSnapshot(st);
         }
         st.scoreHiddenVisible = nextVisible;
+        broadcastState();
+        return;
+      }
+
+      if (type === "SET_RULES_OVERLAY_VISIBLE") {
+        if (ws.meta.screen !== "controller") return;
+        st.ui.rulesOverlayVisible = !!msg.visible;
+        persistControllerPrefs(st);
         broadcastState();
         return;
       }
@@ -937,6 +1093,9 @@ function createWsServer(httpServer) {
         }
 
         p.name = name;
+        if (st.boardAnswer?.responses?.[p.id]) {
+          st.boardAnswer.responses[p.id].playerName = name;
+        }
         broadcastState();
         return;
       }
@@ -946,6 +1105,97 @@ function createWsServer(httpServer) {
 
         const order = Array.isArray(msg.playerOrder) ? msg.playerOrder.map((id) => String(id || "")) : [];
         normalizePlayerOrder(st, order);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_BOARD_ANSWER_MODE || "SET_BOARD_ANSWER_MODE")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+        st.boardAnswer.enabled = !!msg.enabled;
+        st.boardAnswer.visibleOnVisualizer = st.boardAnswer.enabled;
+        st.ui.boardAnswerEnabled = st.boardAnswer.enabled;
+        st.ui.boardAnswerVisible = st.boardAnswer.visibleOnVisualizer;
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_BOARD_ANSWER_VISIBILITY || "SET_BOARD_ANSWER_VISIBILITY")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+        st.boardAnswer.visibleOnVisualizer = !!msg.visible;
+        st.ui.boardAnswerVisible = st.boardAnswer.visibleOnVisualizer;
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.CLEAR_BOARD_ANSWERS || "CLEAR_BOARD_ANSWERS")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+        st.boardAnswer.responses = {};
+        st.boardAnswer.lastJudged = null;
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_BOARD_ANSWER_FLAG || "SET_BOARD_ANSWER_FLAG")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+        const playerId = String(msg.playerId || "").trim();
+        const entry = ensureBoardAnswerEntry(st, playerId);
+        if (!entry) return;
+        entry.flag = sanitizeBoardAnswerFlag(msg.flag);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.APPLY_BOARD_ANSWER_JUDGMENTS || "APPLY_BOARD_ANSWER_JUDGMENTS")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+
+        const results = {};
+        let correctApplied = 0;
+        let wrongApplied = 0;
+
+        for (const playerId of Object.keys(st.players || {})) {
+          const entry = ensureBoardAnswerEntry(st, playerId);
+          if (!entry) continue;
+          const flag = sanitizeBoardAnswerFlag(entry.flag);
+          if (!flag) continue;
+
+          if (!st.players[playerId]) continue;
+
+          if (flag === "correct") {
+            queueJudgeOutcomes(st, buildJudgeOutcomes(st, "correct", playerId));
+            correctApplied += 1;
+          } else if (flag === "wrong") {
+            queueJudgeOutcomes(st, buildJudgeOutcomes(st, "wrong", playerId));
+            wrongApplied += 1;
+          }
+
+          entry.result = flag;
+          entry.flag = "";
+          entry.updatedAt = Date.now();
+          results[playerId] = flag;
+        }
+
+        if (!Object.keys(results).length) return;
+
+        applyPendingJudgeOutcome(st);
+        st.boardAnswer.lastJudged = {
+          nonce: Number(st.boardAnswer.lastJudged?.nonce ?? 0) + 1,
+          at: Date.now(),
+          results
+        };
+
+        if (correctApplied > 0 && wrongApplied === 0) {
+          emitSfx(st, "correct");
+        } else if (wrongApplied > 0 && correctApplied === 0) {
+          emitSfx(st, "wrong");
+        }
+
         broadcastState();
         return;
       }
@@ -963,21 +1213,31 @@ function createWsServer(httpServer) {
         return;
       }
 
+      if (type === (C2S.SET_AUTO_RESET || "SET_AUTO_RESET")) {
+        if (ws.meta.screen !== "controller") return;
+
+        st.rules.autoResetEnabled = !!msg.enabled;
+        st.rules.autoResetDelayMs = clampInt(msg.delayMs, 0, 10000, 1500);
+        if (!st.rules.autoResetEnabled) {
+          clearPendingAutoReset();
+        }
+
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
       if (type === C2S.JUDGE_CORRECT) {
         if (ws.meta.screen !== "controller") return;
 
         const cur = getCurrentRespondent(st);
         if (!cur) return;
 
-        const p = st.players[cur.playerId];
-        if (p) {
-          p.correctCount = Number(p.correctCount ?? 0) + 1;
-        }
-        recomputeScores(st);
-        emitMod("JUDGE_CORRECT", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
+        queueJudgeOutcomes(st, buildJudgeOutcomes(st, "correct", cur.playerId));
         emitSfx(st, "correct");
-        recomputePlayerStatuses(st);
+        emitMod("JUDGE_CORRECT", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
         setResult(st, { type: "correct", playerId: cur.playerId });
+        scheduleAutoReset(st);
         broadcastState();
         scheduleNextQuestion();
         return;
@@ -989,18 +1249,7 @@ function createWsServer(httpServer) {
         const cur = getCurrentRespondent(st);
         if (!cur) return;
 
-        const p = st.players[cur.playerId];
-        if (p) {
-          p.wrongCount = Number(p.wrongCount ?? 0) + 1;
-        }
-        recomputeScores(st);
-
-        // 誤答罰：次問から休みを付与
-        const penalty = Number(st.rules?.restPenalty ?? 0);
-        if (penalty > 0) {
-          const p = st.players[cur.playerId];
-          if (p) p.pendingRestAdd = Number(p.pendingRestAdd ?? 0) + penalty;
-        }
+        queueJudgeOutcomes(st, buildJudgeOutcomes(st, "wrong", cur.playerId));
 
         st.judge.wrongSet[cur.playerId] = true;
 
@@ -1008,9 +1257,17 @@ function createWsServer(httpServer) {
 
         emitMod("JUDGE_WRONG", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
 
+        if (st.rules?.autoResetEnabled) {
+          emitSfx(st, "wrong");
+          scheduleAutoReset(st);
+          broadcastState();
+          return;
+        }
+
         if (buzzMode === "single") {
           emitSfx(st, "wrong");
-          setResult(st, { type: "single_wrong", playerId: cur.playerId });
+          setResult(st, { type: "skip", playerId: cur.playerId });
+          scheduleAutoReset(st);
           broadcastState();
           scheduleNextQuestion();
           return;
@@ -1053,7 +1310,8 @@ function createWsServer(httpServer) {
           // まだ次の押下者がいない → 受付に戻して押下待ち（buzzOrderは保持）
           if (!hasAnyEligiblePlayer(st)) {
             emitSfx(st, "wrong");
-            setResult(st, { type: "all_wrong" });
+            setResult(st, { type: "skip" });
+            scheduleAutoReset(st);
             broadcastState();
             scheduleNextQuestion();
             return;
@@ -1071,6 +1329,7 @@ function createWsServer(httpServer) {
           if (!hasAnyEligiblePlayer(st)) {
             emitSfx(st, "wrong");
             setResult(st, { type: "all_wrong" });
+            scheduleAutoReset(st);
             broadcastState();
             scheduleNextQuestion();
             return;
@@ -1096,26 +1355,28 @@ function createWsServer(httpServer) {
         emitSfx(st, "skip");
 
         setResult(st, { type: "skip" });
+        scheduleAutoReset(st);
         broadcastState();
         scheduleNextQuestion();
         return;
       }
 
-      if (type === C2S.PLAY_SFX) {
-        if (ws.meta.screen !== "controller") return;
+        if (type === C2S.PLAY_SFX) {
+          if (ws.meta.screen !== "controller") return;
 
-        const key = String(msg.key || "").trim();
-        if (!key) return;
+          const key = String(msg.key || "").trim();
+          if (!key) return;
 
         if (key === "thinking") {
           emitSfx(st, "thinking", { durationSec: Number(st.rules?.thinkingSeconds ?? 5) });
-        } else {
-          emitSfx(st, key);
-        }
+          } else {
+            emitSfx(st, key);
+          }
 
-        broadcastState();
-        return;
-      }
+          emitMod("STATE_UPDATED", { at: Date.now() });
+          broadcastState();
+          return;
+        }
 
       if (type === C2S.SET_THINKING_SECONDS) {
         if (ws.meta.screen !== "controller") return;
@@ -1138,10 +1399,19 @@ function createWsServer(httpServer) {
         const c = clampInt(msg.correctCount, 0, 1000000, 0);
         const w = clampInt(msg.wrongCount, 0, 1000000, 0);
         const r = clampInt(msg.restCount, 0, 1000000, Number(p.restCount ?? 0));
+        const hasScore = Number.isFinite(Number(msg.score));
+        const desiredScore = hasScore ? clampEditableScore(msg.score, Number(p.score ?? 0)) : Number(p.score ?? 0);
 
         p.correctCount = c;
         p.wrongCount = w;
         p.restCount = r;
+        p.forceDisqualify = false;
+        const handlers = getActiveRuleDefinition(st).handlers || {};
+        if (hasScore && typeof handlers.applyManualScoreEdit === "function") {
+          handlers.applyManualScoreEdit(p, st.rules || {}, desiredScore);
+        } else if (hasScore) {
+          p.score = desiredScore;
+        }
 
         recomputeScores(st);
         recomputePlayerStatuses(st);
@@ -1193,16 +1463,22 @@ function createWsServer(httpServer) {
 
       if (type === "SET_UI_PREFS") {
         st.ui = st.ui || {};
+        ensureBoardAnswerState(st);
 
         st.ui.showScore = msg.showScore !== false;
         st.ui.showCorrectCount = msg.showCorrectCount !== false;
         st.ui.showWrongCount = msg.showWrongCount !== false;
         st.ui.controllerSortMode = String(msg.controllerSortMode || "manual") === "rank" ? "rank" : "manual";
         st.ui.visualizerSortMode = String(msg.visualizerSortMode || "manual") === "rank" ? "rank" : "manual";
+        st.ui.playersViewMode = String(msg.playersViewMode || "grid") === "table" ? "table" : "grid";
         if (!Array.isArray(st.ui.playerOrder)) st.ui.playerOrder = [];
-        st.ui.playerTileLayout = String(msg.playerTileLayout || "grid") === "vertical" ? "vertical" : "grid";
+        {
+          const layout = String(msg.playerTileLayout || "grid");
+          st.ui.playerTileLayout = layout === "vertical" || layout === "slim" ? layout : "grid";
+        }
         st.ui.prioritizePressedPlayers = !!msg.prioritizePressedPlayers;
         st.ui.swapJudgeColors = !!msg.swapJudgeColors;
+        st.ui.backgroundDarkTheme = !!msg.backgroundDarkTheme;
         st.ui.playerTileDarkTheme = !!msg.playerTileDarkTheme;
         st.ui.showVerticalScore = msg.showVerticalScore !== false;
         st.ui.showVerticalCorrectCount = msg.showVerticalCorrectCount !== false;
@@ -1212,6 +1488,8 @@ function createWsServer(httpServer) {
         st.ui.showMarks = !!msg.showMarks;
         st.ui.showMarkCorrect = msg.showMarkCorrect !== false;
         st.ui.showMarkWrong = msg.showMarkWrong !== false;
+        st.ui.boardAnswerEnabled = st.boardAnswer.enabled;
+        st.ui.boardAnswerVisible = st.boardAnswer.visibleOnVisualizer;
 
         if (st.scoreHiddenVisible) {
           if (st.ui.visualizerSortMode === "rank") {
@@ -1239,7 +1517,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
 
         try {
-          exportCurrentPresetFile(st);
+          exportNamedPresetFile(st, msg.fileName);
         } catch (err) {
           send(ws, { type: S2C.ERROR, error: err?.message || "プリセット保存に失敗しました" });
         }
@@ -1267,6 +1545,7 @@ function createWsServer(httpServer) {
         if (ws.meta.screen !== "controller") return;
 
         applyControllerPrefs(st, createDefaultControllerPrefs());
+        ensureBoardAnswerState(st);
         recomputeScores(st);
         recomputePlayerStatuses(st);
         persistControllerPrefs(st);
@@ -1284,20 +1563,10 @@ function createWsServer(httpServer) {
       if (type === "AC_RESET") {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        clearPendingAutoReset();
 
         for (const p of Object.values(st.players || {})) {
-          p.correctCount = 0;
-          p.wrongCount = 0;
-          p.score = 0;
-
-          p.qualifiedAt = null;
-          p.dqAt = null;
-          p.passRank = null;
-          p.status = "active";
-          p.reach = { qualify: false, dq: false };
-
-          p.restCount = 0;
-          p.pendingRestAdd = 0;
+          resetPlayerProgressForRule(st, p);
         }
         recomputeScores(st);
         emitMod("AC_RESET", { by: ws.meta?.screen ?? "controller", at: Date.now() });
@@ -1307,6 +1576,9 @@ function createWsServer(httpServer) {
         resetBuzzer(st);
         resetJudge(st);
         st.phase = "lobby";
+        ensureBoardAnswerState(st);
+        st.boardAnswer.responses = {};
+        st.boardAnswer.lastJudged = null;
 
         recomputePlayerStatuses(st);
         broadcastState();
@@ -1324,6 +1596,31 @@ function createWsServer(httpServer) {
       }
 
       // --- Player操作 ---
+      if (type === (C2S.SUBMIT_BOARD_ANSWER || "SUBMIT_BOARD_ANSWER")) {
+        if (ws.meta.screen !== "player" || !ws.meta.playerId) return;
+        ensureBoardAnswerState(st);
+        if (!st.boardAnswer.enabled) return;
+
+        const playerId = ws.meta.playerId;
+        const player = st.players?.[playerId];
+        if (!player) return;
+
+        const entry = ensureBoardAnswerEntry(st, playerId);
+        if (!entry) return;
+        if (entry.submittedAt) return;
+
+        const text = sanitizeBoardAnswer(msg.text);
+        const hadSubmission = !!entry.submittedAt;
+        entry.playerName = String(player.name || "");
+        entry.text = text;
+        entry.result = "";
+        entry.flag = "";
+        entry.submittedAt = hadSubmission ? Number(entry.submittedAt || Date.now()) : Date.now();
+        entry.updatedAt = Date.now();
+        broadcastState();
+        return;
+      }
+
       if (type === C2S.BUZZ) {
         if (ws.meta.screen !== "player" || !ws.meta.playerId) return;
 
@@ -1418,6 +1715,7 @@ function createWsServer(httpServer) {
       if (type === C2S.SET_ACTIVE_MOD) {
         if (ws.meta.screen !== "controller") return;
         clearWrongAdvanceTimer();
+        clearPendingAutoReset();
 
         const modIdRaw = String(msg.modId || "").trim();
         const prevActive = String(st.mods?.active || "").trim();
@@ -1428,7 +1726,13 @@ function createWsServer(httpServer) {
             getModRuntime()?.emit?.(prevActive, "MOD_DEACTIVATED", {});
           }
           st.mods.active = null;
+          if (st.preModUiTheme) {
+            st.ui.backgroundDarkTheme = !!st.preModUiTheme.backgroundDarkTheme;
+            st.ui.playerTileDarkTheme = !!st.preModUiTheme.playerTileDarkTheme;
+          }
+          st.preModUiTheme = null;
           st.modScoreboardVisible = false;
+          persistControllerPrefs(st);
           broadcastState();
           broadcastToScreens(["controller", "visualizer"], { type: S2C.RELOAD });
           return;
@@ -1446,6 +1750,31 @@ function createWsServer(httpServer) {
 
         st.mods.active = modIdRaw;
         st.modScoreboardVisible = false;
+        if (!prevActive) {
+          st.preModUiTheme = {
+            backgroundDarkTheme: !!st.ui.backgroundDarkTheme,
+            playerTileDarkTheme: !!st.ui.playerTileDarkTheme
+          };
+        }
+
+        const autoPresetFile = findAutoPresetFileForMod(st, modIdRaw);
+        if (autoPresetFile) {
+          const prefs = loadPresetFile(autoPresetFile);
+          applyControllerPrefs(st, prefs);
+          recomputeScores(st);
+          recomputePlayerStatuses(st);
+          updatePresetList(st);
+        } else if (modIdRaw === "timerace") {
+          st.rules.autoResetEnabled = true;
+        }
+
+        ensureModThemePrefs(st);
+        const modThemePrefs = st.ui?.modThemePrefs?.[modIdRaw];
+        if (modThemePrefs) {
+          st.ui.backgroundDarkTheme = !!modThemePrefs.backgroundDarkTheme;
+          st.ui.playerTileDarkTheme = !!modThemePrefs.playerTileDarkTheme;
+        }
+        persistControllerPrefs(st);
         if (!st.titleScreenAutoShown) {
           st.titleScreenVisible = true;
           st.titleScreenAutoShown = true;
@@ -1495,6 +1824,7 @@ function createWsServer(httpServer) {
             emitMod("JUDGE_SKIP", { by: "mod_dispatch", at: Date.now() });
             emitSfx(st, "skip");
             setResult(st, { type: "skip" });
+            scheduleAutoReset(st);
             broadcastState();
             scheduleNextQuestion();
           } else if (stateChanged) {

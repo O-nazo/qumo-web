@@ -7,6 +7,10 @@ function sendCmd(cmd) {
   window.parent.postMessage({ type: "MOD_PANEL_CMD", cmd }, "*");
 }
 
+function sendControllerShortcut(shortcut) {
+  sendCmd({ type: "CONTROLLER_SHORTCUT", shortcut });
+}
+
 function qs(id) { return document.getElementById(id); }
 function formatMediaTime(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -221,14 +225,44 @@ function isTypingTarget(target) {
   return !!target.closest?.('[contenteditable="true"]');
 }
 
+function isKeyboardShortcut(event, { code, key }) {
+  const eventCode = String(event?.code || "");
+  const eventKey = String(event?.key || "").toLowerCase();
+  if (code && eventCode === code) return true;
+  if (key && eventKey === String(key).toLowerCase()) return true;
+  return false;
+}
+
 window.addEventListener("keydown", (e) => {
   if (e.defaultPrevented || e.repeat) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (isTypingTarget(e.target)) return;
 
   const key = String(e.key || "").toLowerCase();
   if (key === " " || key === "spacebar") {
     e.preventDefault();
     sendCmd({ type: "VQ_START" });
+  } else if (isKeyboardShortcut(e, { code: "Numpad2" })) {
+    e.preventDefault();
+    sendControllerShortcut("PRESENT");
+  } else if (isKeyboardShortcut(e, { code: "Numpad1" })) {
+    e.preventDefault();
+    sendControllerShortcut("RESET");
+  } else if (isKeyboardShortcut(e, { code: "Numpad3" })) {
+    e.preventDefault();
+    sendControllerShortcut("THINKING");
+  } else if (isKeyboardShortcut(e, { code: "Numpad0" })) {
+    e.preventDefault();
+    sendControllerShortcut("CORRECT");
+  } else if (isKeyboardShortcut(e, { code: "NumpadDecimal" })) {
+    e.preventDefault();
+    sendControllerShortcut("SKIP_OR_WRONG");
+  } else if (isKeyboardShortcut(e, { key: "backspace" })) {
+    e.preventDefault();
+    sendControllerShortcut("SKIP");
+  } else if (isKeyboardShortcut(e, { code: "NumpadEnter" })) {
+    e.preventDefault();
+    sendControllerShortcut("MOD_PRIMARY");
   } else if (key === "q") {
     e.preventDefault();
     sendCmd({ type: "PRESENT" });

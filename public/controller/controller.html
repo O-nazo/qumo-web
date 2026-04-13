@@ -25,114 +25,207 @@
 
         <div class="row">
           <label>
-            正解時の加点
-            <input id="correctPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            得点・勝敗ルール
+            <select id="ruleProfile" style="width:260px;"></select>
           </label>
         </div>
 
         <div class="row">
           <label>
-            誤答時の減加
-            <input id="wrongPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            勝ち抜け人数
+            <input id="displayQualifyPlayerCount" type="number" min="0" max="1000000" step="1" style="width:140px;">
+            人
+          </label>
+          <label>
+            失格人数
+            <input id="displayDisqualifiedPlayerCount" type="number" min="0" max="1000000" step="1" style="width:140px;">
+            人
           </label>
         </div>
 
-        <div class="row">
-          <label>
-            誤答罰（次問から休み）
-            <input id="restPenalty" type="number" min="0" max="20" step="1" style="width:90px;">
-            問
-          </label>
+        <div class="ruleProfileGroup" data-rule-profile="standard">
+          <div class="row">
+            <label>
+              正解時の加点
+              <input id="correctPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              誤答時の減加
+              <input id="wrongPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              誤答罰（次問から休み）
+              <input id="restPenalty" type="number" min="0" max="20" step="1" style="width:90px;">
+              問
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              <input id="qualifyEnabled" type="checkbox">
+              勝ち抜け 有効
+            </label>
+            <label>
+              目標得点
+              <input id="qualifyScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            </label>
+          </div>
+          <div class="row">
+            <label>
+              <input id="qualifyCountEnabled" type="checkbox">
+              n回正解で勝ち抜け
+            </label>
+            <input id="qualifyCorrectCount" type="number" value="4" style="width:80px;">
+          </div>
+
+          <div class="row">
+            <label>
+              <input id="dqEnabled" type="checkbox">
+              失格 有効
+            </label>
+            <label>
+              失格得点
+              <input id="dqScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            </label>
+          </div>
+          <div class="row">
+            <label>
+              <input id="dqWrongEnabled" type="checkbox">
+              n回誤答で失格
+            </label>
+            <input id="dqWrongCount" type="number" value="3" style="width:80px;">
+          </div>
         </div>
 
-        <div class="row">
-          <label>
-            <input id="qualifyEnabled" type="checkbox">
-            勝ち抜け 有効
-          </label>
-          <label>
-            目標得点
-            <input id="qualifyScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-          </label>
-        </div>
-        <div class="row">
-          <label>
-            <input id="qualifyCountEnabled" type="checkbox">
-            n回正解で勝ち抜け
-          </label>
-          <input id="qualifyCorrectCount" type="number" value="4" style="width:80px;">
+        <div class="ruleProfileGroup" data-rule-profile="attack_survival" hidden>
+          <div class="row">
+            <label>
+              開始ポイント
+              <input id="attackStartPoints" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              P
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              正解時の攻撃力
+              <input id="attackCorrectDamage" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              P
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              誤答時の自傷
+              <input id="attackWrongDamage" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              P
+            </label>
+          </div>
         </div>
 
-        <div class="row">
-          <label>
-            <input id="dqEnabled" type="checkbox">
-            失格 有効
-          </label>
-          <label>
-            失格得点
-            <input id="dqScore" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
-          </label>
-        </div>
-        <div class="row">
-          <label>
-            <input id="dqWrongEnabled" type="checkbox">
-            n回誤答で失格
-          </label>
-          <input id="dqWrongCount" type="number" value="3" style="width:80px;">
+        <div class="ruleProfileGroup" data-rule-profile="up_down" hidden>
+          <div class="row">
+            <label>
+              正解時の加点
+              <input id="upDownCorrectGain" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              P
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              勝ち抜け目標
+              <input id="upDownQualifyScore" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              P
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              失格誤答数
+              <input id="upDownDqWrongCount" type="number" min="1" max="1000000" step="1" style="width:140px;">
+              回
+            </label>
+          </div>
         </div>
 
       </div>
 
-      <div class="overlayPanel" id="settingsPanel" hidden>
+      <div class="overlayPanel overlayPanelWide" id="settingsPanel" hidden>
         <h2>設定</h2>
-        <div class="row">
-          <label>
-            <input id="autoNextEnabled" type="checkbox">
-            自動で次問へ
-          </label>
-          <label>
-            待ち時間
-            <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
-            ms
-          </label>
-        </div>
-
-        <label>
-          シンキング秒数
-          <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
-          秒
-        </label>
-
         <div class="modalSection">
-          <div class="modalSectionTitle">プリセット</div>
+          <div class="modalSectionTitle">クイズ設定</div>
           <div class="modalSectionBody">
             <div class="row">
-              <button id="exportRulePreset" type="button">プリセット出力</button>
-            </div>
-            <div class="row">
               <label>
-                プリセット選択
-                <select id="rulePresetSelect" style="width:320px;"></select>
+                <input id="autoResetEnabled" type="checkbox">
+                判定後に自動リセット
+              </label>
+              <label>
+                待ち時間
+                <input id="autoResetDelayMs" type="number" min="0" max="10000" step="10" style="width:120px;">
+                ms
               </label>
             </div>
+
             <div class="row">
-              <button id="applyRulePreset" type="button">適用</button>
-              <button id="refreshRulePresets" type="button">更新</button>
+              <label>
+                <input id="autoNextEnabled" type="checkbox">
+                自動で次問へ
+              </label>
+              <label>
+                待ち時間
+                <input id="autoNextDelayMs" type="number" min="0" max="10000" step="50" style="width:120px;">
+                ms
+              </label>
             </div>
+
             <div class="row">
-              <button id="resetControllerPrefs" class="danger" type="button">初期化</button>
+              <label>
+                シンキング秒数
+                <input id="thinkingSeconds" type="number" min="0" max="60" step="1" style="width:90px;">
+                秒
+              </label>
             </div>
           </div>
         </div>
 
         <div class="modalSection">
+          <div class="modalSectionTitle">プリセット</div>
+          <div class="modalSectionBody">
+            <div class="row presetRow presetRow-export">
+              <label class="presetField">
+                プリセット名
+                <input id="presetExportName" type="text" value="Rules">
+              </label>
+              <button id="exportRulePreset" class="presetActionBtn" type="button">プリセット出力</button>
+            </div>
+            <div class="row presetRow presetRow-apply">
+              <label class="presetField presetField-select">
+                プリセット選択
+                <select id="rulePresetSelect"></select>
+              </label>
+              <button id="applyRulePreset" class="presetActionBtn" type="button">適用</button>
+              <button id="refreshRulePresets" class="presetActionBtn" type="button">更新</button>
+            </div>
+            <div class="row">
+              <button id="resetControllerPrefs" class="danger" type="button">ルール・スコア・設定初期化</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modalSection">
+          <div class="modalSectionTitle">その他</div>
           <div class="modalSectionBody">
             <div class="row">
               <div>参加用URL：</div>
               <span id="joinUrls"></span>
-            </div>
-            <div class="row">
-              <button id="toggleJoinQr">QR表示</button>
             </div>
           </div>
         </div>
@@ -145,7 +238,8 @@
           <div class="modalSectionTitle">全体</div>
           <div class="modalSectionBody">
             <div class="row">
-              <label><input id="playerTileDarkTheme" type="checkbox"> ダークモード</label>
+              <label><input id="backgroundDarkTheme" type="checkbox"> 背景ダークモード</label>
+              <label><input id="playerTileDarkTheme" type="checkbox"> プレイヤータイル ダークモード</label>
               <label class="judgeColorSampleLabel">
                 <input id="swapJudgeColors" type="checkbox">
                 <span>正誤色を入れ替える</span>
@@ -176,17 +270,7 @@
 
         <div class="modalSection">
           <div class="modalSectionTitle">プレイヤー表示</div>
-          <div class="modalSectionBody">
-            <div class="row">
-              <div id="playerTileLayoutToggle" class="viewToggle" role="group" aria-label="プレイヤー表示切替">
-                <button id="playerTileLayoutGrid" class="viewToggleBtn is-active" type="button" title="グリッド表示" aria-label="グリッド表示">
-                  <i class="fa-solid fa-grip"></i>
-                </button>
-                <button id="playerTileLayoutVertical" class="viewToggleBtn" type="button" title="縦書き表示" aria-label="縦書き表示">
-                  <i class="fa-solid fa-grip-lines-vertical"></i>
-                </button>
-              </div>
-            </div>
+            <div class="modalSectionBody">
             <div class="modalSubsectionTitle">プレイヤーソート</div>
             <div class="row">
               <label>
@@ -203,6 +287,19 @@
                   <option value="rank">ランクソート</option>
                 </select>
               </label>
+            </div>
+            <div class="row">
+              <div id="playerTileLayoutToggle" class="viewToggle" role="group" aria-label="プレイヤー表示切替">
+                <button id="playerTileLayoutGrid" class="viewToggleBtn is-active" type="button" title="グリッド表示" aria-label="グリッド表示">
+                  <i class="fa-solid fa-grip"></i>
+                </button>
+                <button id="playerTileLayoutVertical" class="viewToggleBtn" type="button" title="縦書き表示" aria-label="縦書き表示">
+                  <i class="fa-solid fa-grip-lines-vertical"></i>
+                </button>
+                <button id="playerTileLayoutSlim" class="viewToggleBtn" type="button" title="スリム型表示" aria-label="スリム型表示">
+                  <i class="fa-solid fa-bars-staggered"></i>
+                </button>
+              </div>
             </div>
 
             <div class="modalSubsection" id="gridVisualOptions">
@@ -238,11 +335,18 @@
       </div>
 
       <div class="overlayPanel" id="modsSettingPanel" hidden>
-        <div class="row">
-          <div>MOD選択</div>
-          <select id="modSelect"></select>
-          <button id="modApply">Apply</button>
-          <button id="modReset">Reset</button>
+        <h2>MOD</h2>
+        <div class="modalSectionBody">
+          <div class="row">
+            <div>MOD選択</div>
+            <select id="modSelect"></select>
+            <button id="modApply">Apply</button>
+            <button id="modReset">Reset</button>
+          </div>
+          <div class="row">
+            <label><input id="modBackgroundDarkTheme" type="checkbox"> 背景ダークモード</label>
+            <label><input id="modPlayerTileDarkTheme" type="checkbox"> プレイヤータイル ダークモード</label>
+          </div>
         </div>
       </div>
 
@@ -251,11 +355,13 @@
         <div class="modalSection">
           <div class="modalSectionTitle">キーバインド</div>
           <div class="modalSectionBody helpList">
-            <div class="helpItem"><span class="helpKey">q</span><span class="helpDesc">出題</span></div>
-            <div class="helpItem"><span class="helpKey">r</span><span class="helpDesc">リセット</span></div>
-            <div class="helpItem"><span class="helpKey">t</span><span class="helpDesc">長考</span></div>
-            <div class="helpItem"><span class="helpKey">o</span><span class="helpDesc">正解</span></div>
-            <div class="helpItem"><span class="helpKey">x</span><span class="helpDesc">誤答 / スルー（誰も押していない時）</span></div>
+            <div class="helpItem"><span class="helpKey">q / テンキー 2</span><span class="helpDesc">出題</span></div>
+            <div class="helpItem"><span class="helpKey">r / テンキー 1</span><span class="helpDesc">リセット</span></div>
+            <div class="helpItem"><span class="helpKey">t / テンキー 3</span><span class="helpDesc">長考</span></div>
+            <div class="helpItem"><span class="helpKey">o / テンキー 0</span><span class="helpDesc">正解</span></div>
+            <div class="helpItem"><span class="helpKey">x / テンキー . / Del</span><span class="helpDesc">誤答 / スルー（誰も押していない時）</span></div>
+            <div class="helpItem"><span class="helpKey">Backspace</span><span class="helpDesc">スルー</span></div>
+            <div class="helpItem"><span class="helpKey">テンキー Enter</span><span class="helpDesc">MOD用ボタン</span></div>
           </div>
         </div>
       </div>
@@ -271,7 +377,9 @@
         <button id="openHelp" class="iconBtn" title="ヘルプ"><i class="fa-solid fa-circle-question"></i></button>
         <button id="openModsSettings" class="iconBtn" title="MOD"><i class="fa-solid fa-puzzle-piece"></i></button>
         <button id="toggleJoinQrTop" class="iconBtn" title="QRコード表示"><i class="fa-solid fa-qrcode"></i></button>
-        <button id="toggleModScoreboard" class="iconBtn topToolsSpacer" title="得点板を表示"><i class="fa-solid fa-table-cells-large"></i></button>
+        <button id="toggleRulesOverlay" class="iconBtn topToolsSpacer" title="ルールを表示"><i class="fa-solid fa-clipboard-list"></i></button>
+        <button id="toggleModScoreboard" class="iconBtn" title="得点板を表示"><i class="fa-solid fa-table-cells-large"></i></button>
+        <button id="toggleBoardAnswerMode" class="iconBtn" title="ボード解答"><i class="fa-solid fa-pen-to-square"></i></button>
         <button id="toggleScoreHidden" class="iconBtn" title="得点を非表示"><span class="iconBtnLabel">？</span></button>
         <button id="toggleTitleScreen" class="iconBtn" title="蓋画を表示"><span class="iconBtnLabel">蓋</span></button>
         <button id="acReset" class="iconBtn iconBtnDanger" title="AC">AC</button>
@@ -316,12 +424,15 @@
               <i class="fa-solid fa-table-list"></i>
             </button>
           </div>
+          <button id="boardJudge" type="button">判定</button>
+          <button id="boardAnswerClear" type="button">解答クリア</button>
         </div>
         <div id="playerCount" class="playerCount">0人接続中</div>
       </div>
       <div id="playersGrid" class="grid playersGrid"></div>
     </section>
 
+    <script src="/common/numberInputWheel.js"></script>
     <script type="module" src="/controller/controller.js"></script>
   </div>
 </body>

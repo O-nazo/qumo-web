@@ -1,19 +1,11 @@
 {
+  "savedAt": "2026-04-06T10:46:21.589Z",
   "rules": {
     "buzzMode": "cultq",
-    "ruleProfile": "standard",
-    "displayQualifyPlayerCount": 0,
-    "displayDisqualifiedPlayerCount": 0,
     "restPenalty": 0,
     "thinkingSeconds": 5,
     "correctPoints": 1,
     "wrongPoints": 0,
-    "attackStartPoints": 20,
-    "attackCorrectDamage": 1,
-    "attackWrongDamage": 1,
-    "upDownCorrectGain": 1,
-    "upDownQualifyScore": 7,
-    "upDownDqWrongCount": 2,
     "qualifyEnabled": false,
     "qualifyScore": 1,
     "dqEnabled": false,
@@ -35,7 +27,6 @@
     "showWrongCount": true,
     "controllerSortMode": "rank",
     "visualizerSortMode": "rank",
-    "playersViewMode": "grid",
     "playerTileLayout": "vertical",
     "prioritizePressedPlayers": false,
     "swapJudgeColors": false,
@@ -50,9 +41,6 @@
     "showMarkCorrect": true,
     "showMarkWrong": true,
     "joinQrVisible": false,
-    "rulesOverlayVisible": false,
-    "boardAnswerEnabled": false,
-    "boardAnswerVisible": false,
     "modThemePrefs": {
       "example": {
         "backgroundDarkTheme": false,
@@ -65,10 +53,6 @@
       "visual_quiz": {
         "backgroundDarkTheme": true,
         "playerTileDarkTheme": true
-      },
-      "intro_quiz": {
-        "backgroundDarkTheme": false,
-        "playerTileDarkTheme": false
       }
     }
   }

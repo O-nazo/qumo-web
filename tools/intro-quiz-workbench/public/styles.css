@@ -1,0 +1,312 @@
+:root {
+  --bg: #f5efe4;
+  --paper: rgba(255, 252, 246, 0.92);
+  --ink: #1c1a16;
+  --muted: #645c50;
+  --line: rgba(28, 26, 22, 0.14);
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --shadow: 0 18px 50px rgba(44, 31, 10, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "BIZ UDPGothic", "Yu Gothic UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(194, 65, 12, 0.12), transparent 22%),
+    linear-gradient(160deg, #f8f2e9 0%, #efe6d6 100%);
+}
+
+.shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.hero,
+.panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "BIZ UDPMincho", "Yu Mincho", serif;
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.12;
+}
+
+.lead {
+  margin: 12px 0 0;
+  max-width: 760px;
+  color: var(--muted);
+}
+
+.heroActions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 220px;
+}
+
+.fileButton,
+button,
+a.buttonLike {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--ink);
+  padding: 11px 16px;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.fileButton:hover,
+button:hover,
+a.buttonLike:hover {
+  transform: translateY(-1px);
+}
+
+.fileButton input {
+  display: none;
+}
+
+button.primary,
+.fileButton,
+a.buttonLike.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: white;
+  border-color: transparent;
+}
+
+.generatePanel {
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.status,
+.hint,
+.artistText,
+.timeText {
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  color: var(--ink);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+  gap: 20px;
+}
+
+.queuePanel,
+.listPanel {
+  padding: 22px;
+}
+
+.emptyState {
+  padding: 36px 24px;
+  border: 1px dashed var(--line);
+  border-radius: 20px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.nowCard {
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.92), rgba(236,245,244,0.92));
+  border: 1px solid var(--line);
+}
+
+.metaLine,
+.miniActions,
+.transport,
+.linkRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.badge.subtle {
+  background: rgba(28, 26, 22, 0.06);
+  color: var(--muted);
+}
+
+.playerShell {
+  margin-top: 18px;
+}
+
+.playerFrame,
+.playerFallback {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #111;
+}
+
+.playerFallback {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(17,17,17,0.94), rgba(44,44,44,0.94)),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0 8px, transparent 8px 16px);
+  color: white;
+}
+
+.transport {
+  margin-top: 16px;
+}
+
+.fieldGrid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.fieldGrid label {
+  display: grid;
+  gap: 8px;
+}
+
+.fieldGrid .wide {
+  grid-column: 1 / -1;
+}
+
+.tableWrap {
+  max-height: 72vh;
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(255,255,255,0.78);
+}
+
+th,
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 14px;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr.active {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.linkRow a {
+  color: var(--accent-strong);
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 16px;
+  }
+
+  .hero {
+    flex-direction: column;
+    padding: 22px;
+  }
+
+  .row,
+  .heroActions {
+    flex-direction: column;
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
+  }
+}

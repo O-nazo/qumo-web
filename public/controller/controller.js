@@ -1,4 +1,5 @@
 import { createClient } from "/common/common.js";
+import { RULE_PROFILE_DEFINITIONS } from "/common/ruleCatalog.js";
 
 const client = createClient({ screen: "controller" });
 
@@ -15,7 +16,11 @@ const modPanelBody = document.getElementById("modPanelBody");
 
 const modSelect = document.getElementById("modSelect");
 const modApply = document.getElementById("modApply");
+const modBackgroundDarkThemeEl = document.getElementById("modBackgroundDarkTheme");
+const modPlayerTileDarkThemeEl = document.getElementById("modPlayerTileDarkTheme");
 const toggleJoinQrTop = document.getElementById("toggleJoinQrTop");
+const toggleRulesOverlayBtn = document.getElementById("toggleRulesOverlay");
+const toggleBoardAnswerModeBtn = document.getElementById("toggleBoardAnswerMode");
 const toggleModScoreboardBtn = document.getElementById("toggleModScoreboard");
 const toggleScoreHiddenBtn = document.getElementById("toggleScoreHidden");
 const toggleTitleScreenBtn = document.getElementById("toggleTitleScreen");
@@ -25,22 +30,59 @@ const playersViewGridBtn = document.getElementById("playersViewGrid");
 const playersViewTableBtn = document.getElementById("playersViewTable");
 const playerTileLayoutGridBtn = document.getElementById("playerTileLayoutGrid");
 const playerTileLayoutVerticalBtn = document.getElementById("playerTileLayoutVertical");
+const playerTileLayoutSlimBtn = document.getElementById("playerTileLayoutSlim");
 const controllerSortModeEl = document.getElementById("controllerSortMode");
 const visualizerSortModeEl = document.getElementById("visualizerSortMode");
 const gridVisualOptionsEl = document.getElementById("gridVisualOptions");
 const verticalVisualOptionsEl = document.getElementById("verticalVisualOptions");
 
 let currentModId = null;
+const latestModEvents = new Map();
 let playersViewMode = "grid";
 let draggedPlayerId = null;
 let playerTileLayoutMode = "grid";
+
+function getSelectedModThemePrefs(st, modId) {
+  const id = String(modId || "").trim();
+  const defaults = st?.mods?.meta?.[id]?.uiDefaults || {};
+  const prefs = st?.ui?.modThemePrefs?.[id] || {};
+  return {
+    backgroundDarkTheme: prefs.backgroundDarkTheme ?? !!defaults.backgroundDarkTheme,
+    playerTileDarkTheme: prefs.playerTileDarkTheme ?? !!defaults.playerTileDarkTheme
+  };
+}
+
+function syncModThemePrefInputs(st) {
+  const modId = String(modSelect?.value || "").trim();
+  const hasMod = !!modId;
+  const prefs = getSelectedModThemePrefs(st || lastState || {}, modId);
+  if (modBackgroundDarkThemeEl) {
+    modBackgroundDarkThemeEl.disabled = !hasMod;
+    modBackgroundDarkThemeEl.checked = hasMod ? !!prefs.backgroundDarkTheme : false;
+  }
+  if (modPlayerTileDarkThemeEl) {
+    modPlayerTileDarkThemeEl.disabled = !hasMod;
+    modPlayerTileDarkThemeEl.checked = hasMod ? !!prefs.playerTileDarkTheme : false;
+  }
+}
+
+function emitModThemePrefs() {
+  const modId = String(modSelect?.value || "").trim();
+  if (!modId) return;
+  client.emit("SET_MOD_THEME_PREFS", {
+    modId,
+    backgroundDarkTheme: !!modBackgroundDarkThemeEl?.checked,
+    playerTileDarkTheme: !!modPlayerTileDarkThemeEl?.checked
+  });
+}
 
 function setModPanelVisible(v){
   modPanel.hidden = !v;
 }
 
-function loadModPanel(modId){
+function loadModPanel(modId, options = {}){
   const id = String(modId || "").trim();
+  const force = !!options.force;
   const panel = document.getElementById("modPanel");
   const body = document.getElementById("modPanelBody");
 
@@ -53,16 +95,24 @@ function loadModPanel(modId){
     return;
   }
 
-  if (currentModId === id) return;
+  if (!force && currentModId === id) return;
   currentModId = id;
 
   panel.hidden = false;
 
   body.innerHTML = "";
   const iframe = document.createElement("iframe");
-  iframe.src = `/mods/${encodeURIComponent(id)}/controller/panel.html`;
+  const bust = force ? `?v=${Date.now()}` : "";
+  iframe.src = `/mods/${encodeURIComponent(id)}/controller/panel.html${bust}`;
   iframe.addEventListener("load", () => {
     iframe.contentWindow?.postMessage({ type: "MOD_INIT", modId: id }, "*");
+    const latestEvent = latestModEvents.get(id);
+    if (latestEvent) {
+      iframe.contentWindow?.postMessage(
+        { type: "MOD_EVENT", modId: id, event: latestEvent },
+        "*"
+      );
+    }
   });
   body.appendChild(iframe);
 }
@@ -78,6 +128,7 @@ function applyPlayersViewMode() {
 function applyPlayerTileLayoutMode() {
   playerTileLayoutGridBtn?.classList.toggle("is-active", playerTileLayoutMode === "grid");
   playerTileLayoutVerticalBtn?.classList.toggle("is-active", playerTileLayoutMode === "vertical");
+  playerTileLayoutSlimBtn?.classList.toggle("is-active", playerTileLayoutMode === "slim");
   if (gridVisualOptionsEl) gridVisualOptionsEl.hidden = playerTileLayoutMode !== "grid";
   if (verticalVisualOptionsEl) verticalVisualOptionsEl.hidden = playerTileLayoutMode !== "vertical";
 }
@@ -133,7 +184,12 @@ let lastState = null;
 
 client.onMessage?.((msg) => {
   if (msg?.type === "RELOAD") {
-    console.log("[controller] reload by MOD change");
+    console.log("[controller] soft reload by MOD change");
+    const activeModId = String(lastState?.mods?.active || currentModId || "").trim();
+    if (activeModId) {
+      loadModPanel(activeModId, { force: true });
+      return;
+    }
     location.reload();
     return;
   }
@@ -144,6 +200,10 @@ client.onMessage?.((msg) => {
   }
 
   if (msg?.type !== "MOD_EVENT") return;
+
+  if (msg.modId) {
+    latestModEvents.set(String(msg.modId), msg.event || null);
+  }
 
   const activeId = String(lastState?.mods?.active || "");
   if (!activeId) return;
@@ -173,13 +233,19 @@ const els = {
   qno: document.querySelector("#qno"),
 
   buzzMode: document.querySelector("#buzzMode"),
+  ruleProfile: document.querySelector("#ruleProfile"),
+  displayQualifyPlayerCount: document.querySelector("#displayQualifyPlayerCount"),
+  displayDisqualifiedPlayerCount: document.querySelector("#displayDisqualifiedPlayerCount"),
   joinUrls: document.querySelector("#joinUrls"),
   toggleJoinQr: document.querySelector("#toggleJoinQr"),
   playersGrid: document.querySelector("#playersGrid"),
   restPenalty: document.querySelector("#restPenalty"),
   thinkingSeconds: document.querySelector("#thinkingSeconds"),
+  autoResetEnabled: document.querySelector("#autoResetEnabled"),
+  autoResetDelayMs: document.querySelector("#autoResetDelayMs"),
   autoNextEnabled: document.querySelector("#autoNextEnabled"),
   autoNextDelayMs: document.querySelector("#autoNextDelayMs"),
+  presetExportName: document.querySelector("#presetExportName"),
   rulePresetSelect: document.querySelector("#rulePresetSelect"),
   exportRulePreset: document.querySelector("#exportRulePreset"),
   applyRulePreset: document.querySelector("#applyRulePreset"),
@@ -188,6 +254,15 @@ const els = {
 
   correctPoints: document.querySelector("#correctPoints"),
   wrongPoints: document.querySelector("#wrongPoints"),
+  attackStartPoints: document.querySelector("#attackStartPoints"),
+  attackCorrectDamage: document.querySelector("#attackCorrectDamage"),
+  attackWrongDamage: document.querySelector("#attackWrongDamage"),
+  upDownCorrectGain: document.querySelector("#upDownCorrectGain"),
+  upDownQualifyScore: document.querySelector("#upDownQualifyScore"),
+  upDownDqWrongCount: document.querySelector("#upDownDqWrongCount"),
+  boardAnswerEnabled: document.querySelector("#boardAnswerEnabled"),
+  boardJudge: document.querySelector("#boardJudge"),
+  boardAnswerClear: document.querySelector("#boardAnswerClear"),
   present: document.querySelector("#present"),
   buzzerReset: document.querySelector("#buzzerReset"),
   thinking: document.querySelector("#thinking"),
@@ -216,6 +291,7 @@ const els = {
   showVerticalRestCount: document.querySelector("#showVerticalRestCount"),
   showVerticalBuzzOrder: document.querySelector("#showVerticalBuzzOrder"),
   swapJudgeColors: document.querySelector("#swapJudgeColors"),
+  backgroundDarkTheme: document.querySelector("#backgroundDarkTheme"),
   playerTileDarkTheme: document.querySelector("#playerTileDarkTheme"),
   showMarks: document.querySelector("#showMarks"),
   showMarkCorrect: document.querySelector("#showMarkCorrect"),
@@ -224,7 +300,7 @@ const els = {
   qualifyReachEnabled: document.querySelector("#qualifyReachEnabled"),
   dqReachEnabled: document.querySelector("#dqReachEnabled"),
   acReset: document.querySelector("#acReset"),
-
+  ruleProfileGroups: Array.from(document.querySelectorAll(".ruleProfileGroup"))
 };
 
 // 旧: 受付開始/リセット/次問 は廃止（自動進行）
@@ -242,6 +318,27 @@ function sendModPanelCmd(cmd) {
     modId,
     cmd
   });
+}
+
+function getBoardEntry(st, playerId) {
+  return st.boardAnswer?.responses?.[playerId] || null;
+}
+
+function getBoardResultBadge(result) {
+  if (result === "correct") return `<span class="boardResultBadge is-correct">○</span>`;
+  if (result === "wrong") return `<span class="boardResultBadge is-wrong">✕</span>`;
+  return "";
+}
+
+function setBoardAnswerFlag(playerId, flag) {
+  const current = sanitizeBoardFlag(getBoardEntry(lastState || {}, playerId)?.flag);
+  const nextFlag = current === flag ? "" : flag;
+  client.emit("SET_BOARD_ANSWER_FLAG", { playerId, flag: nextFlag });
+}
+
+function sanitizeBoardFlag(raw) {
+  const value = String(raw || "").toLowerCase();
+  return value === "correct" || value === "wrong" ? value : "";
 }
 
 function syncVisualQuizPresentIfActive() {
@@ -283,6 +380,10 @@ function handleWrong() {
   else client.emit("PLAY_SFX", { key: "wrong" });
 }
 
+function handleBoardJudge() {
+  client.emit("APPLY_BOARD_ANSWER_JUDGMENTS");
+}
+
 function handleReset() {
   client.emit("BUZZER_RESET");
   client.emit("PLAY_SFX", { key: "__stop__" });
@@ -305,6 +406,11 @@ function toggleScoreHidden() {
   client.emit("SET_SCORE_HIDDEN", { visible: nextVisible });
 }
 
+function toggleRulesOverlay() {
+  const nextVisible = !(lastState?.ui?.rulesOverlayVisible === true);
+  client.emit("SET_RULES_OVERLAY_VISIBLE", { visible: nextVisible });
+}
+
 function handleThinking() {
   client.emit("PLAY_SFX", { key: "thinking" });
 }
@@ -324,33 +430,157 @@ function isTypingTarget(target) {
   return !!target.closest?.('[contenteditable="true"]');
 }
 
+function isKeyboardShortcut(event, { code, key }) {
+  const eventCode = String(event?.code || "");
+  const eventKey = String(event?.key || "").toLowerCase();
+  if (code && eventCode === code) return true;
+  if (key && eventKey === String(key).toLowerCase()) return true;
+  return false;
+}
+
+function getLatestModState(modId) {
+  return latestModEvents.get(String(modId || "").trim())?.state || null;
+}
+
+function notifyActiveModShortcut(shortcut) {
+  const activeModId = String(lastState?.mods?.active || currentModId || "").trim();
+  if (!activeModId) return;
+
+  const iframe = document.querySelector("#modPanelBody iframe");
+  iframe?.contentWindow?.postMessage({
+    type: "CONTROLLER_SHORTCUT_TRIGGERED",
+    modId: activeModId,
+    shortcut
+  }, "*");
+}
+
+function triggerActiveModPrimaryAction() {
+  const activeModId = String(lastState?.mods?.active || currentModId || "").trim();
+  if (!activeModId) return false;
+
+  if (activeModId === "visual_quiz") {
+    client.send({
+      type: "MOD_CMD",
+      modId: activeModId,
+      cmd: { type: "VQ_START" }
+    });
+    return true;
+  }
+
+  if (activeModId === "timerace") {
+    const state = getLatestModState(activeModId);
+    const canPass = !!state?.passEnabled
+      && Number(state.passRemaining ?? 0) > 0
+      && (state.phase === "running" || state.phase === "countdown" || state.phase === "stopped");
+    if (!canPass) return false;
+
+    client.send({
+      type: "MOD_CMD",
+      modId: activeModId,
+      cmd: { type: "TR_PASS" }
+    });
+    handleReset();
+    return true;
+  }
+
+  if (activeModId === "intro_quiz") {
+    const modState = getLatestModState(activeModId);
+    const isPlaying = modState?.playbackStatus?.paused === false;
+    client.send({
+      type: "MOD_CMD",
+      modId: activeModId,
+      cmd: { type: isPlaying ? "IQ_HARD_STOP" : "IQ_PLAY" }
+    });
+    return true;
+  }
+
+  return false;
+}
+
+function handleControllerShortcut(shortcut) {
+  const action = String(shortcut || "").trim();
+  if (!action) return false;
+
+  if (action === "PRESENT") {
+    handlePresent();
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "RESET") {
+    handleReset();
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "THINKING") {
+    handleThinking();
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "CORRECT") {
+    handleCorrect();
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "SKIP_OR_WRONG") {
+    handleSkipOrWrong();
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "SKIP") {
+    client.emit("JUDGE_SKIP");
+    notifyActiveModShortcut(action);
+    return true;
+  }
+  if (action === "MOD_PRIMARY") {
+    const handled = triggerActiveModPrimaryAction();
+    if (handled) notifyActiveModShortcut(action);
+    return handled;
+  }
+  return false;
+}
+
 els.present.addEventListener("click", handlePresent);
 els.buzzerReset?.addEventListener("click", handleReset);
 els.thinking.addEventListener("click", handleThinking);
 els.correct.addEventListener("click", handleCorrect);
 els.wrong.addEventListener("click", handleWrong);
+els.boardJudge?.addEventListener("click", handleBoardJudge);
 els.skip.addEventListener("click", () => client.emit("JUDGE_SKIP"));
 
 window.addEventListener("keydown", (e) => {
   if (e.defaultPrevented || e.repeat) return;
   if (isTypingTarget(e.target)) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
 
   const key = String(e.key || "").toLowerCase();
-  if (key === "q") {
+  if (isKeyboardShortcut(e, { code: "Numpad2" }) || key === "q") {
     e.preventDefault();
-    handlePresent();
-  } else if (key === "r") {
+    handleControllerShortcut("PRESENT");
+  } else if (
+    isKeyboardShortcut(e, { code: "Numpad1" }) ||
+    key === "r"
+  ) {
     e.preventDefault();
-    handleReset();
-  } else if (key === "t") {
+    handleControllerShortcut("RESET");
+  } else if (isKeyboardShortcut(e, { code: "Numpad3" }) || key === "t") {
     e.preventDefault();
-    handleThinking();
-  } else if (key === "o") {
+    handleControllerShortcut("THINKING");
+  } else if (isKeyboardShortcut(e, { code: "Numpad0" }) || key === "o") {
     e.preventDefault();
-    handleCorrect();
-  } else if (key === "x") {
+    handleControllerShortcut("CORRECT");
+  } else if (
+    isKeyboardShortcut(e, { code: "NumpadDecimal" }) ||
+    key === "x"
+  ) {
     e.preventDefault();
-    handleSkipOrWrong();
+    handleControllerShortcut("SKIP_OR_WRONG");
+  } else if (isKeyboardShortcut(e, { key: "backspace" })) {
+    e.preventDefault();
+    handleControllerShortcut("SKIP");
+  } else if (isKeyboardShortcut(e, { code: "NumpadEnter" })) {
+    if (handleControllerShortcut("MOD_PRIMARY")) {
+      e.preventDefault();
+    }
   }
 });
 
@@ -361,8 +591,24 @@ els.buzzMode?.addEventListener("change", () => {
   client.emit("SET_BUZZ_MODE", { buzzMode: v });
 });
 
+els.ruleProfile?.addEventListener("change", () => {
+  const v = String(els.ruleProfile.value || "standard");
+  updateRuleProfileGroups(v);
+  client.emit("SET_RULE_PROFILE", { ruleProfile: v });
+});
+
 els.correctPoints.addEventListener("change", emitRulePoints);
 els.wrongPoints.addEventListener("change", emitRulePoints);
+[
+  els.displayQualifyPlayerCount,
+  els.displayDisqualifiedPlayerCount,
+  els.attackStartPoints,
+  els.attackCorrectDamage,
+  els.attackWrongDamage,
+  els.upDownCorrectGain,
+  els.upDownQualifyScore,
+  els.upDownDqWrongCount
+].forEach((el) => el?.addEventListener("change", emitRuleProfileConfig));
 
 els.thinkingSeconds.addEventListener("change", () => {
   const n = Number(els.thinkingSeconds.value);
@@ -374,7 +620,7 @@ els.restPenalty.addEventListener("change", () => {
   client.emit("SET_REST_PENALTY", { restPenalty: n });
 });
 
-els.toggleJoinQr.addEventListener("click", toggleJoinQrVisibility);
+els.toggleJoinQr?.addEventListener("click", toggleJoinQrVisibility);
 toggleJoinQrTop?.addEventListener("click", toggleJoinQrVisibility);
 
 [
@@ -406,6 +652,7 @@ toggleJoinQrTop?.addEventListener("click", toggleJoinQrVisibility);
   els.showVerticalRestCount,
   els.showVerticalBuzzOrder,
   els.swapJudgeColors,
+  els.backgroundDarkTheme,
   els.playerTileDarkTheme,
   els.showMarks,
   els.showMarkCorrect,
@@ -418,6 +665,7 @@ els.acReset.addEventListener("click", () => {
   client.emit("AC_RESET");
 });
 toggleModScoreboardBtn?.addEventListener("click", toggleModScoreboard);
+toggleRulesOverlayBtn?.addEventListener("click", toggleRulesOverlay);
 toggleScoreHiddenBtn?.addEventListener("click", toggleScoreHidden);
 toggleTitleScreenBtn?.addEventListener("click", toggleTitleScreen);
 
@@ -428,17 +676,6 @@ els.qno?.addEventListener("keydown", (e) => {
     els.qno.blur();
   }
 });
-els.qno?.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  if (document.activeElement !== els.qno) {
-    els.qno.focus({ preventScroll: true });
-  }
-
-  const cur = Number(els.qno.value || 0);
-  const next = Math.max(0, Math.floor(cur + (e.deltaY < 0 ? 1 : -1)));
-  els.qno.value = String(next);
-  commitQuestionNo();
-}, { passive: false });
 
 function emitRulePoints() {
   client.emit("SET_RULE_POINTS", {
@@ -453,13 +690,44 @@ function clampCount(n) {
   return Math.max(0, Math.min(999, Math.trunc(x)));
 }
 
-function setCounts(playerId, correctCount, wrongCount, restCount) {
-  client.emit("SET_COUNTS", {
+function populateRuleProfileOptions() {
+  const select = els.ruleProfile;
+  if (!select) return;
+  const currentValue = String(select.value || "");
+  select.innerHTML = "";
+  for (const rule of RULE_PROFILE_DEFINITIONS) {
+    const option = document.createElement("option");
+    option.value = rule.id;
+    option.textContent = rule.label;
+    select.appendChild(option);
+  }
+  select.value = RULE_PROFILE_DEFINITIONS.some((rule) => rule.id === currentValue)
+    ? currentValue
+    : (RULE_PROFILE_DEFINITIONS[0]?.id || "standard");
+}
+
+function updateRuleProfileGroups(ruleProfile) {
+  const activeProfile = String(ruleProfile || "standard");
+  for (const group of els.ruleProfileGroups || []) {
+    const profiles = String(group?.dataset?.ruleProfile || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    group.hidden = profiles.length > 0 && !profiles.includes(activeProfile);
+  }
+}
+
+function setCounts(playerId, correctCount, wrongCount, restCount, score) {
+  const payload = {
     playerId,
     correctCount: clampCount(correctCount),
     wrongCount: clampCount(wrongCount),
     restCount: clampCount(restCount)
-  });
+  };
+  if (score !== undefined) {
+    payload.score = Number(score);
+  }
+  client.emit("SET_COUNTS", payload);
 }
 
 function renderJoinUrls(st) {
@@ -518,6 +786,21 @@ function emitAdvanceRules() {
   });
 }
 
+function emitRuleProfileConfig() {
+  client.emit("SET_RULE_PROFILE_CONFIG", {
+    config: {
+      displayQualifyPlayerCount: Number(els.displayQualifyPlayerCount?.value),
+      displayDisqualifiedPlayerCount: Number(els.displayDisqualifiedPlayerCount?.value),
+      attackStartPoints: Number(els.attackStartPoints?.value),
+      attackCorrectDamage: Number(els.attackCorrectDamage?.value),
+      attackWrongDamage: Number(els.attackWrongDamage?.value),
+      upDownCorrectGain: Number(els.upDownCorrectGain?.value),
+      upDownQualifyScore: Number(els.upDownQualifyScore?.value),
+      upDownDqWrongCount: Number(els.upDownDqWrongCount?.value)
+    }
+  });
+}
+
 function emitCountRules() {
   client.emit("SET_RULE_COUNTS", {
     qualifyCountEnabled: els.qualifyCountEnabled.checked,
@@ -532,6 +815,7 @@ function emitUiPrefs() {
     showScore: els.showScore.checked,
     showCorrectCount: els.showCorrectCount.checked,
     showWrongCount: els.showWrongCount.checked,
+    playersViewMode,
     playerTileLayout: playerTileLayoutMode,
     controllerSortMode: String(els.controllerSortMode?.value || "manual"),
     visualizerSortMode: String(els.visualizerSortMode?.value || "manual"),
@@ -540,25 +824,37 @@ function emitUiPrefs() {
     showVerticalCorrectCount: els.showVerticalCorrectCount?.checked !== false,
     showVerticalWrongCount: els.showVerticalWrongCount?.checked !== false,
     showVerticalRestCount: els.showVerticalRestCount?.checked !== false,
-    showVerticalBuzzOrder: els.showVerticalBuzzOrder?.checked !== false,
-    swapJudgeColors: !!els.swapJudgeColors?.checked,
-    playerTileDarkTheme: !!els.playerTileDarkTheme?.checked,
-    showMarks: els.showMarks.checked,
+      showVerticalBuzzOrder: els.showVerticalBuzzOrder?.checked !== false,
+      swapJudgeColors: !!els.swapJudgeColors?.checked,
+      backgroundDarkTheme: !!els.backgroundDarkTheme?.checked,
+      playerTileDarkTheme: !!els.playerTileDarkTheme?.checked,
+      showMarks: els.showMarks.checked,
     showMarkCorrect: els.showMarkCorrect.checked,
     showMarkWrong: els.showMarkWrong.checked
   });
 }
 
 function emitAutoNextSettings() {
+  client.emit("SET_AUTO_RESET", {
+    enabled: !!els.autoResetEnabled?.checked,
+    delayMs: Number(els.autoResetDelayMs?.value)
+  });
   client.emit("SET_AUTO_NEXT", {
     enabled: !!els.autoNextEnabled?.checked,
     delayMs: Number(els.autoNextDelayMs?.value)
   });
 }
 
+els.autoResetEnabled?.addEventListener("change", emitAutoNextSettings);
+els.autoResetDelayMs?.addEventListener("change", emitAutoNextSettings);
 els.autoNextEnabled?.addEventListener("change", emitAutoNextSettings);
 els.autoNextDelayMs?.addEventListener("change", emitAutoNextSettings);
-els.exportRulePreset?.addEventListener("click", () => client.send({ type: "EXPORT_RULE_PRESET" }));
+els.exportRulePreset?.addEventListener("click", () => {
+  client.send({
+    type: "EXPORT_RULE_PRESET",
+    fileName: String(els.presetExportName?.value || "")
+  });
+});
 els.refreshRulePresets?.addEventListener("click", () => client.send({ type: "LIST_RULE_PRESETS" }));
 els.applyRulePreset?.addEventListener("click", () => {
   const fileName = String(els.rulePresetSelect?.value || "");
@@ -630,10 +926,13 @@ function requestPlayerRename(playerId, currentName) {
 
 function renderRankBadge(rank) {
   const text = ordinalShortEn(rank);
+  const crown = rank === 1
+    ? `<i class="fa-solid fa-crown" aria-hidden="true"></i>`
+    : `<span aria-hidden="true">&nbsp;</span>`;
   if (rank === 1) {
-    return `<span class="rankBadge is-first"><i class="fa-solid fa-crown" aria-hidden="true"></i><span>${text}</span></span>`;
+    return `<span class="rankBadge is-first"><span class="rankBadgeCrown">${crown}</span><span>${text}</span></span>`;
   }
-  return `<span class="rankBadge"><span>${text}</span></span>`;
+  return `<span class="rankBadge"><span class="rankBadgeCrown">${crown}</span><span>${text}</span></span>`;
 }
 
 function getControllerNameClass(name) {
@@ -754,6 +1053,7 @@ function renderPlayersGrid(st) {
 
   const cur = getCurrentRespondent(st);
   const currentPlayerId = cur?.playerId ?? null;
+  const boardMode = !!st.boardAnswer?.enabled;
 
   for (const p of sorted) {
     const info = orderMap.get(p.id) || null;
@@ -764,12 +1064,18 @@ function renderPlayersGrid(st) {
     let gapText = "-";
     if (info && firstAt != null && order >= 2) gapText = formatGapSeconds(info.at - firstAt);
     const buzzOrderText = formatBuzzOrder(order, gapText);
+    const boardEntry = getBoardEntry(st, p.id);
+    const boardText = String(boardEntry?.text || "");
+    const boardFlag = sanitizeBoardFlag(boardEntry?.flag);
+    const boardResult = sanitizeBoardFlag(boardEntry?.result);
 
     const isCurrent = currentPlayerId === p.id;
     const isWronged = !!st.judge?.wrongSet?.[p.id];
     const isCorrect =
-      st.judge?.lastResult?.type === "correct" &&
-      st.judge.lastResult.playerId === p.id;
+      (st.judge?.lastResult?.type === "correct" &&
+      st.judge.lastResult.playerId === p.id) ||
+      boardResult === "correct";
+    const isBoardWrong = boardResult === "wrong";
 
     const restCount = Number(p.restCount ?? 0);
     const isResting = restCount > 0;
@@ -793,7 +1099,7 @@ function renderPlayersGrid(st) {
       (info ? " pressed" : "") +
       (order === 1 ? " first" : "") +
       (isCurrent ? " current" : "") +
-      (isWronged ? " wrong" : "") +
+      (isWronged || isBoardWrong ? " wrong" : "") +
       (isCorrect ? " correct" : "") +
       (isResting ? " resting" : "");
     tile.dataset.playerId = p.id;
@@ -802,21 +1108,31 @@ function renderPlayersGrid(st) {
     const correctCount = Number(p.correctCount ?? 0);
     const wrongCount = Number(p.wrongCount ?? 0);
     const score = Number(p.score ?? 0);
+    const boardAnswerHtml = boardMode
+      ? `<div class="boardAnswerInline${boardText ? "" : " is-empty"}">${boardText ? escapeHtml(boardText) : ""}</div>`
+      : "";
+    const boardJudgeHtml = boardMode
+      ? `<div class="boardAnswerJudge">
+          <span class="boardJudgeBtn${boardFlag === "correct" ? " is-active" : ""}" data-flag="correct" title="○">○</span>
+          <span class="boardJudgeBtn${boardFlag === "wrong" ? " is-active" : ""}" data-flag="wrong" title="✕">✕</span>
+          ${getBoardResultBadge(boardResult)}
+        </div>`
+      : "";
 
     if (playersViewMode === "table") {
       tile.innerHTML = `
-        <div class="nameRow">
-          <div class="nameCell">
-            <div class="tileRank">${rankText}</div>
-            <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
-          </div>
-          <div class="right">
-            ${reachHtml}
-          </div>
+        <div class="nameCell">
+          <div class="tileRank">${rankText}</div>
+          <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
         </div>
-
-        <div class="score">${score}</div>
-
+        ${boardMode ? boardAnswerHtml : `<div class="tableSpacer">${reachHtml}</div>`}
+        <div class="right">
+          <div class="v2 buzzOrderLine">${buzzOrderText}</div>
+          ${boardMode ? boardJudgeHtml : ""}
+        </div>
+        <div class="score countEdit">
+          <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
+        </div>
         <div class="row2">
           <div class="label label-correct">○</div>
           <div class="countEdit">
@@ -839,72 +1155,122 @@ function renderPlayersGrid(st) {
         </div>
       `;
     } else {
-      tile.innerHTML = `
-        <div class="tileRank">${rankText}</div>
-        <div class="row1">
-          <div class="nameCell">
-            <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+      if (boardMode) {
+        tile.innerHTML = `
+          <div class="row1 boardTopRow">
+            <div class="nameCell">
+              <div class="tileRank">${rankText}</div>
+              <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+            </div>
+            <div class="right">
+              <div class="v2 buzzOrderLine">${buzzOrderText}</div>
+            </div>
           </div>
-          <div class="right">
-            ${reachHtml}
-            <div class="score">${score}</div>
-          </div>
-        </div>
 
-        <div class="row2">
-          <div class="countsInline">
-            <div class="countPair">
-              <div class="label label-correct">○</div>
-              <div class="countEdit">
-                <input class="countInput" data-kind="correct" type="number" min="0" max="999" step="1" value="${correctCount}" />
-              </div>
-            </div>
-            <div class="countPair">
-              <div class="label label-wrong">✕</div>
-              <div class="countEdit">
-                <input class="countInput" data-kind="wrong" type="number" min="0" max="999" step="1" value="${wrongCount}" />
-              </div>
-            </div>
-            <div class="countPair">
-              <div class="label label-rest">休</div>
-              <div class="countEdit">
-                <input class="countInput" data-kind="rest" type="number" min="0" max="999" step="1" value="${restCount}" />
+          ${boardAnswerHtml}
+          <div class="meta">
+            <div class="kv2">
+              <div>${reachHtml}</div>
+              <div class="score countEdit">
+                <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
               </div>
             </div>
           </div>
-        </div>
+          <div class="meta">
+            <div class="kv2">
+              <div></div>
+              ${boardJudgeHtml}
+            </div>
+          </div>
 
-        <div class="meta">
-          <div class="v2 buzzOrderLine">${buzzOrderText}</div>
-        </div>
-      `;
+          <div class="row2">
+            <div class="countsInline">
+              <div class="countPair">
+                <div class="label label-correct">○</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="correct" type="number" min="0" max="999" step="1" value="${correctCount}" />
+                </div>
+              </div>
+              <div class="countPair">
+                <div class="label label-wrong">✕</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="wrong" type="number" min="0" max="999" step="1" value="${wrongCount}" />
+                </div>
+              </div>
+              <div class="countPair">
+                <div class="label label-rest">休</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="rest" type="number" min="0" max="999" step="1" value="${restCount}" />
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      } else {
+        tile.innerHTML = `
+          <div class="tileRank">${rankText}</div>
+          <div class="row1">
+            <div class="nameCell">
+              <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+            </div>
+            <div class="right">
+              ${reachHtml}
+              <div class="score countEdit">
+                <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
+              </div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="countsInline">
+              <div class="countPair">
+                <div class="label label-correct">○</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="correct" type="number" min="0" max="999" step="1" value="${correctCount}" />
+                </div>
+              </div>
+              <div class="countPair">
+                <div class="label label-wrong">✕</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="wrong" type="number" min="0" max="999" step="1" value="${wrongCount}" />
+                </div>
+              </div>
+              <div class="countPair">
+                <div class="label label-rest">休</div>
+                <div class="countEdit">
+                  <input class="countInput" data-kind="rest" type="number" min="0" max="999" step="1" value="${restCount}" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="meta">
+            <div class="v2 buzzOrderLine">${buzzOrderText}</div>
+          </div>
+        `;
+      }
     }
+
+    if (boardMode) tile.classList.add("boardMode");
 
     const getInput = (kind) => tile.querySelector(`.countInput[data-kind="${kind}"]`);
     const renameNameText = tile.querySelector(".renameNameText");
+    const correctFlagBtn = tile.querySelector('.boardJudgeBtn[data-flag="correct"]');
+    const wrongFlagBtn = tile.querySelector('.boardJudgeBtn[data-flag="wrong"]');
 
-    function commitCounts() {
+    function commitCounts(options = {}) {
       const c = getInput("correct")?.value ?? 0;
       const w = getInput("wrong")?.value ?? 0;
       const r = getInput("rest")?.value ?? 0;
-      setCounts(p.id, c, w, r);
+      const s = options.includeScore ? (getInput("score")?.value ?? 0) : undefined;
+      setCounts(p.id, c, w, r, s);
     }
 
     for (const inp of tile.querySelectorAll(".countInput")) {
-      inp.addEventListener("change", commitCounts);
+      inp.addEventListener("change", () => commitCounts({ includeScore: inp.dataset.kind === "score" }));
       inp.addEventListener("keydown", (e) => {
         if (e.key === "Enter") inp.blur();
       });
-      inp.addEventListener("wheel", (e) => {
-        if (document.activeElement !== inp) inp.focus({ preventScroll: true });
-        e.preventDefault();
-
-        const step = Number(inp.step || 1);
-        const delta = e.deltaY < 0 ? step : -step;
-        const next = clampCount(Number(inp.value || 0) + delta);
-        inp.value = String(next);
-        commitCounts();
-      }, { passive: false });
     }
 
     renameNameText?.addEventListener("dblclick", (e) => {
@@ -959,6 +1325,18 @@ function renderPlayersGrid(st) {
       }, { once: true });
     });
 
+    correctFlagBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setBoardAnswerFlag(p.id, "correct");
+    });
+
+    wrongFlagBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setBoardAnswerFlag(p.id, "wrong");
+    });
+
     if (playersViewMode === "table") {
       tile.addEventListener("dragstart", (e) => {
         draggedPlayerId = p.id;
@@ -1008,12 +1386,14 @@ function renderPlayersGrid(st) {
 playersViewGridBtn?.addEventListener("click", () => {
   playersViewMode = "grid";
   applyPlayersViewMode();
+  emitUiPrefs();
   if (lastState) renderPlayersGrid(lastState);
 });
 
 playersViewTableBtn?.addEventListener("click", () => {
   playersViewMode = "table";
   applyPlayersViewMode();
+  emitUiPrefs();
   if (lastState) renderPlayersGrid(lastState);
 });
 
@@ -1024,24 +1404,44 @@ playerTileLayoutGridBtn?.addEventListener("click", () => {
   emitUiPrefs();
 });
 
-playerTileLayoutVerticalBtn?.addEventListener("click", () => {
+  playerTileLayoutVerticalBtn?.addEventListener("click", () => {
   if (playerTileLayoutMode === "vertical") return;
   playerTileLayoutMode = "vertical";
+  applyPlayerTileLayoutMode();
+  emitUiPrefs();
+  });
+
+playerTileLayoutSlimBtn?.addEventListener("click", () => {
+  if (playerTileLayoutMode === "slim") return;
+  playerTileLayoutMode = "slim";
   applyPlayerTileLayoutMode();
   emitUiPrefs();
 });
 
 controllerSortModeEl?.addEventListener("change", emitUiPrefs);
 visualizerSortModeEl?.addEventListener("change", emitUiPrefs);
+els.boardAnswerEnabled?.addEventListener("click", () => {
+  client.emit("SET_BOARD_ANSWER_MODE", { enabled: !(lastState?.boardAnswer?.enabled === true) });
+});
+toggleBoardAnswerModeBtn?.addEventListener("click", () => {
+  client.emit("SET_BOARD_ANSWER_MODE", { enabled: !(lastState?.boardAnswer?.enabled === true) });
+});
+els.boardAnswerClear?.addEventListener("click", () => {
+  client.emit("CLEAR_BOARD_ANSWERS");
+});
 
 applyPlayersViewMode();
 applyPlayerTileLayoutMode();
+populateRuleProfileOptions();
+updateRuleProfileGroups(els.ruleProfile?.value || "standard");
 
 client.onState((st) => {
   lastState = st;
   if (document.activeElement !== els.qno) {
     els.qno.value = String(st.questionNo ?? 1);
   }
+  playersViewMode = String(st.ui?.playersViewMode || "grid") === "table" ? "table" : "grid";
+  applyPlayersViewMode();
   renderJoinUrls(st);
   renderRulePresets(st);
   if (playerCountEl) {
@@ -1057,6 +1457,19 @@ client.onState((st) => {
     (m === "single") ? "single" :
     "endless";
   }
+  if (els.ruleProfile) {
+    const profile = String(st.rules?.ruleProfile || "standard");
+    els.ruleProfile.value = RULE_PROFILE_DEFINITIONS.some((rule) => rule.id === profile)
+      ? profile
+      : (RULE_PROFILE_DEFINITIONS[0]?.id || "standard");
+    updateRuleProfileGroups(els.ruleProfile.value);
+  }
+  if (els.displayQualifyPlayerCount) {
+    els.displayQualifyPlayerCount.value = String(st.rules?.displayQualifyPlayerCount ?? 0);
+  }
+  if (els.displayDisqualifiedPlayerCount) {
+    els.displayDisqualifiedPlayerCount.value = String(st.rules?.displayDisqualifiedPlayerCount ?? 0);
+  }
   const cur = getCurrentRespondent(st);
   const canJudge = st.judge?.status === "in_progress" && !!cur;
   els.correct.dataset.mode = canJudge ? "judge" : "sfx";
@@ -1068,6 +1481,40 @@ client.onState((st) => {
   els.thinkingSeconds.value = String(st.rules?.thinkingSeconds ?? 5);
   els.correctPoints.value = String(st.rules?.correctPoints ?? 1);
   els.wrongPoints.value = String(st.rules?.wrongPoints ?? -1);
+  if (els.attackStartPoints) {
+    els.attackStartPoints.value = String(st.rules?.attackStartPoints ?? 20);
+  }
+  if (els.attackCorrectDamage) {
+    els.attackCorrectDamage.value = String(st.rules?.attackCorrectDamage ?? 1);
+  }
+  if (els.attackWrongDamage) {
+    els.attackWrongDamage.value = String(st.rules?.attackWrongDamage ?? 1);
+  }
+  if (els.upDownCorrectGain) {
+    els.upDownCorrectGain.value = String(st.rules?.upDownCorrectGain ?? 1);
+  }
+  if (els.upDownQualifyScore) {
+    els.upDownQualifyScore.value = String(st.rules?.upDownQualifyScore ?? 7);
+  }
+  if (els.upDownDqWrongCount) {
+    els.upDownDqWrongCount.value = String(st.rules?.upDownDqWrongCount ?? 2);
+  }
+  if (els.boardAnswerEnabled) {
+    els.boardAnswerEnabled.dataset.on = st.boardAnswer?.enabled ? "1" : "0";
+    els.boardAnswerEnabled.title = st.boardAnswer?.enabled ? "ボード解答を無効" : "ボード解答を有効";
+  }
+  if (toggleBoardAnswerModeBtn) {
+    toggleBoardAnswerModeBtn.dataset.on = st.boardAnswer?.enabled ? "1" : "0";
+    toggleBoardAnswerModeBtn.title = st.boardAnswer?.enabled ? "ボード解答を無効" : "ボード解答を有効";
+  }
+  if (els.boardAnswerClear) {
+    els.boardAnswerClear.disabled = !st.boardAnswer?.enabled || Object.keys(st.boardAnswer?.responses || {}).length === 0;
+  }
+  if (els.boardJudge) {
+    const flagged = Object.values(st.boardAnswer?.responses || {}).filter((entry) => sanitizeBoardFlag(entry?.flag)).length;
+    els.boardJudge.disabled = !st.boardAnswer?.enabled || flagged === 0;
+    els.boardJudge.textContent = flagged > 0 ? `判定(${flagged})` : "判定";
+  }
   // 回数ルール
   els.qualifyCountEnabled.checked = !!st.rules?.qualifyCountEnabled;
   els.qualifyCorrectCount.value = String(st.rules?.qualifyCorrectCount ?? 4);
@@ -1079,29 +1526,37 @@ client.onState((st) => {
   els.showWrongCount.checked = st.ui?.showWrongCount !== false;
   if (els.controllerSortMode) els.controllerSortMode.value = String(st.ui?.controllerSortMode || "manual");
   if (els.visualizerSortMode) els.visualizerSortMode.value = String(st.ui?.visualizerSortMode || "manual");
-  playerTileLayoutMode = String(st.ui?.playerTileLayout || "grid");
+  playerTileLayoutMode = ["grid", "vertical", "slim"].includes(String(st.ui?.playerTileLayout || "grid"))
+    ? String(st.ui?.playerTileLayout || "grid")
+    : "grid";
   applyPlayerTileLayoutMode();
   if (els.prioritizePressedPlayers) els.prioritizePressedPlayers.checked = !!st.ui?.prioritizePressedPlayers;
   if (els.showVerticalScore) els.showVerticalScore.checked = st.ui?.showVerticalScore !== false;
   if (els.showVerticalCorrectCount) els.showVerticalCorrectCount.checked = st.ui?.showVerticalCorrectCount !== false;
   if (els.showVerticalWrongCount) els.showVerticalWrongCount.checked = st.ui?.showVerticalWrongCount !== false;
   if (els.showVerticalRestCount) els.showVerticalRestCount.checked = st.ui?.showVerticalRestCount !== false;
-  if (els.showVerticalBuzzOrder) els.showVerticalBuzzOrder.checked = st.ui?.showVerticalBuzzOrder !== false;
-  if (els.swapJudgeColors) els.swapJudgeColors.checked = !!st.ui?.swapJudgeColors;
-  if (els.playerTileDarkTheme) els.playerTileDarkTheme.checked = !!st.ui?.playerTileDarkTheme;
-  els.showMarks.checked = !!st.ui?.showMarks;
-  els.showMarkCorrect.checked = st.ui?.showMarkCorrect !== false;
-  els.showMarkWrong.checked = st.ui?.showMarkWrong !== false;
-  document.body.classList.toggle("swapJudgeColors", !!st.ui?.swapJudgeColors);
+    if (els.showVerticalBuzzOrder) els.showVerticalBuzzOrder.checked = st.ui?.showVerticalBuzzOrder !== false;
+    if (els.swapJudgeColors) els.swapJudgeColors.checked = !!st.ui?.swapJudgeColors;
+   if (els.backgroundDarkTheme) els.backgroundDarkTheme.checked = !!st.ui?.backgroundDarkTheme;
+   if (els.playerTileDarkTheme) els.playerTileDarkTheme.checked = !!st.ui?.playerTileDarkTheme;
+    els.showMarks.checked = !!st.ui?.showMarks;
+    els.showMarkCorrect.checked = st.ui?.showMarkCorrect !== false;
+    els.showMarkWrong.checked = st.ui?.showMarkWrong !== false;
+    document.body.classList.toggle("swapJudgeColors", !!st.ui?.swapJudgeColors);
+    document.body.classList.toggle("backgroundDarkTheme", !!st.ui?.backgroundDarkTheme);
   const qrOn = !!st.ui?.joinQrVisible;
-  els.toggleJoinQr.textContent = qrOn ? "QRコードを非表示" : "QRコードを表示";
-  els.toggleJoinQr.dataset.on = qrOn ? "1" : "0";
+  if (els.toggleJoinQr) {
+    els.toggleJoinQr.textContent = qrOn ? "QRコードを非表示" : "QRコードを表示";
+    els.toggleJoinQr.dataset.on = qrOn ? "1" : "0";
+  }
   if (toggleJoinQrTop) {
     toggleJoinQrTop.dataset.on = qrOn ? "1" : "0";
     toggleJoinQrTop.title = qrOn ? "QRコードを非表示" : "QRコードを表示";
   }
   if (els.autoNextEnabled) els.autoNextEnabled.checked = !!st.rules?.autoNextEnabled;
   if (els.autoNextDelayMs) els.autoNextDelayMs.value = Number(st.rules?.autoNextDelayMs ?? 800);
+  if (els.autoResetEnabled) els.autoResetEnabled.checked = !!st.rules?.autoResetEnabled;
+  if (els.autoResetDelayMs) els.autoResetDelayMs.value = Number(st.rules?.autoResetDelayMs ?? 1500);
   if (toggleTitleScreenBtn) {
     const on = st.titleScreenVisible === true;
     toggleTitleScreenBtn.dataset.on = on ? "1" : "0";
@@ -1117,6 +1572,11 @@ client.onState((st) => {
         : on
         ? "MOD表示に戻す"
         : "得点板を表示";
+  }
+  if (toggleRulesOverlayBtn) {
+    const on = st.ui?.rulesOverlayVisible === true;
+    toggleRulesOverlayBtn.dataset.on = on ? "1" : "0";
+    toggleRulesOverlayBtn.title = on ? "ルール表示を隠す" : "ルールを表示";
   }
   if (toggleScoreHiddenBtn) {
     const on = st.scoreHiddenVisible === true;
@@ -1135,7 +1595,7 @@ client.onState((st) => {
 
   const mods = st?.mods?.available || [];
   const active = st?.mods?.active || "";
-  modSelect.value = st?.mods?.active ?? "";
+  const modMeta = st?.mods?.meta || {};
 
   if (modSelect && modSelect.options.length === 0) {
     const noneOpt = document.createElement("option");
@@ -1146,11 +1606,12 @@ client.onState((st) => {
     mods.forEach(id => {
       const opt = document.createElement("option");
       opt.value = id;
-      opt.textContent = id;
+      opt.textContent = String(modMeta?.[id]?.name || id);
       modSelect.appendChild(opt);
     });
   }
   if (modSelect) modSelect.value = active;
+  syncModThemePrefInputs(st);
 
   // MODが有効なら右パネルを出す（今は仮で st.mods.active を見る）
   if (st?.mods?.active) {
@@ -1168,11 +1629,21 @@ window.addEventListener("message", (ev) => {
   const cmd = data.cmd || {};
   if (!cmd || typeof cmd.type !== "string") return;
 
+  if (cmd.type === "CONTROLLER_SHORTCUT") {
+    handleControllerShortcut(cmd.shortcut);
+    return;
+  }
+
   // allowlist
   if (cmd.type === "PLAY_SFX") {
     const key = String(cmd.key || "").trim();
     if (!key) return;
     client.send({ type: "PLAY_SFX", key });
+    return;
+  }
+
+  if (cmd.type === "BUZZER_RESET") {
+    client.emit("BUZZER_RESET");
     return;
   }
 
@@ -1218,6 +1689,13 @@ modApply?.addEventListener("click", () => {
   const modId = String(modSelect?.value || "").trim();
   client.emit("SET_ACTIVE_MOD", { modId });
 });
+
+modSelect?.addEventListener("change", () => {
+  syncModThemePrefInputs(lastState);
+});
+
+modBackgroundDarkThemeEl?.addEventListener("change", emitModThemePrefs);
+modPlayerTileDarkThemeEl?.addEventListener("change", emitModThemePrefs);
 
 function openPanel(panel) {
   overlay.hidden = false;

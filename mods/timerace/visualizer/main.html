@@ -10,15 +10,30 @@
     <div class="hud">
       <div class="centerColumn">
         <div id="phase" class="phase">STAND-BY</div>
-        <div id="timer" class="timer">01:00:00</div>
+        <div class="timerStack">
+          <div id="timer" class="timer">01:00:00</div>
+          <div id="timerMask" class="timerMask" hidden>??:??:??</div>
+        </div>
         <div class="metaRow">
-          <div class="metaLabel">REMAIN</div>
-          <div id="remaining" class="remaining">00</div>
+          <div class="statBlock">
+            <div class="metaLabel">REMAIN</div>
+            <div class="remainingWrap">
+              <div id="remaining" class="remaining">00</div>
+              <div id="remainingUnit" class="remainingUnit"></div>
+            </div>
+          </div>
+
+          <div id="passBlock" class="statBlock passBlock" hidden>
+            <div class="metaLabel">PASS</div>
+            <div class="remainingWrap passWrap">
+              <div id="passValue" class="remaining">10</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </main>
 
-  <script src="./main.js"></script>
+  <script type="module" src="./main.js"></script>
 </body>
 </html>

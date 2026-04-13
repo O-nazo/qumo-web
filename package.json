@@ -6,6 +6,7 @@
 
   "scripts": {
     "start": "electron .",
+    "intro-workbench": "node tools/intro-quiz-workbench/server.js",
 
     "tunnel": "node tools/run-tunnel.js",
 

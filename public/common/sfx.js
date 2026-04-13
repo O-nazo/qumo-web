@@ -6,13 +6,14 @@ const SFX_FILES = {
   // 先に.wav を試して、なければ .mp3
   correct: ["/assets/sfx/correct.wav", "/assets/sfx/correct.mp3"],
   wrong:   ["/assets/sfx/wrong.wav",   "/assets/sfx/wrong.mp3"],
-  skip:    ["/assets/sfx/wrong.wav",   "/assets/sfx/wrong.mp3"],
+  skip:    ["/assets/sfx/skip.wav",    "/assets/sfx/skip.mp3"],
   buzzer:  ["/assets/sfx/buzzer.wav",  "/assets/sfx/buzzer.mp3"],
   attack:  ["/assets/sfx/attack.wav",  "/assets/sfx/attack.mp3"],
   push:  ["/assets/sfx/push.wav",  "/assets/sfx/push.mp3"],
+  pass:  ["/mods/timerace/assets/pass.mp3"],
 
-  // thinking は従来 mp3 想定なので mp3 優先（無ければ wav）
-  thinking: ["/assets/sfx/thinking.mp3", "/assets/sfx/thinking.wav"],
+  // thinking はループ隙間を減らすため wav 優先
+  thinking: ["/assets/sfx/thinking.wav", "/assets/sfx/thinking.mp3"],
 };
 
 const POOL_SIZE = 4;
@@ -21,9 +22,13 @@ const pools = new Map(); // key -> { audios: Audio[], idx: number }
 let volume = 1.0;
 
 // thinking専用
-let thinkingAudio = null;
+let thinkingCtx = null;
+let thinkingGain = null;
+let thinkingBuffer = null;
+let thinkingSource = null;
 let thinkingTimer = null;
 let thinkingPlaying = false;
+let thinkingToken = 0;
 
 let seqToken = 0;
 let seqAudio = null;
@@ -34,7 +39,11 @@ const resolvedSrc = new Map();
 export async function warmupSfx() {
   for (const key of Object.keys(SFX_FILES)) {
     try {
-      await getPool(key);
+      if (key === "thinking") {
+        await ensureThinkingBuffer();
+      } else {
+        await getPool(key);
+      }
     } catch {}
   }
 }
@@ -131,17 +140,36 @@ async function getPool(key) {
 }
 
 async function ensureThinkingAudio() {
-  if (thinkingAudio) return thinkingAudio;
+  if (thinkingCtx) return thinkingCtx;
+
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return null;
+
+  thinkingCtx = new Ctor();
+  thinkingGain = thinkingCtx.createGain();
+  thinkingGain.gain.value = volume;
+  thinkingGain.connect(thinkingCtx.destination);
+  return thinkingCtx;
+}
+
+async function ensureThinkingBuffer() {
+  if (thinkingBuffer) return thinkingBuffer;
 
   const src = await resolveSrc("thinking");
   if (!src) return null;
 
-  const a = new Audio(src);
-  a.preload = "auto";
-  a.loop = true; // 「チチチチ…」を回し続ける
-  a.volume = volume;
-  thinkingAudio = a;
-  return thinkingAudio;
+  const ctx = await ensureThinkingAudio();
+  if (!ctx) return null;
+
+  try {
+    const res = await fetch(src, { cache: "force-cache" });
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    thinkingBuffer = await ctx.decodeAudioData(buf.slice(0));
+    return thinkingBuffer;
+  } catch {
+    return null;
+  }
 }
 
 export function setSfxVolume(v) {
@@ -151,25 +179,31 @@ export function setSfxVolume(v) {
   for (const pool of pools.values()) {
     for (const a of pool.audios) a.volume = volume;
   }
-  if (thinkingAudio) thinkingAudio.volume = volume;
+  if (thinkingGain) thinkingGain.gain.value = volume;
 }
 
 export function isThinkingPlaying() {
   return thinkingPlaying;
 }
 
-export function stopThinking() {
+function stopThinkingInternal() {
   thinkingPlaying = false;
   if (thinkingTimer) {
     clearTimeout(thinkingTimer);
     thinkingTimer = null;
   }
-  // ここは「作らない」。存在していれば止めるだけ。
-  if (!thinkingAudio) return;
   try {
-    thinkingAudio.pause();
-    thinkingAudio.currentTime = 0;
+    thinkingSource?.stop();
   } catch { /* noop */ }
+  try {
+    thinkingSource?.disconnect();
+  } catch { /* noop */ }
+  thinkingSource = null;
+}
+
+export function stopThinking() {
+  thinkingToken++;
+  stopThinkingInternal();
 }
 
 export function stopAllSfx() {
@@ -193,24 +227,82 @@ export async function startThinking(durationSec) {
     return;
   }
 
-  // まず既存を止めてから開始（タイマー更新）
-  stopThinking();
+  const token = ++thinkingToken;
+  stopThinkingInternal();
 
-  const a = await ensureThinkingAudio();
-  if (!a) return;
+  const ctx = await ensureThinkingAudio();
+  const buffer = await ensureThinkingBuffer();
+  if (!ctx || !buffer || !thinkingGain) return;
 
   try {
-    a.volume = volume;
-    a.currentTime = 0;
-    await a.play();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    if (token !== thinkingToken) return;
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(thinkingGain);
+    source.start(0);
+
+    if (token !== thinkingToken) {
+      try {
+        source.stop();
+      } catch {}
+      try {
+        source.disconnect();
+      } catch {}
+      return;
+    }
+
+    thinkingSource = source;
     thinkingPlaying = true;
 
     thinkingTimer = setTimeout(() => {
+      if (token !== thinkingToken) return;
       stopThinking();
     }, Math.floor(sec * 1000));
   } catch {
     // autoplay制限など（Visualizerを一度クリックすると通りやすい）
-    thinkingPlaying = false;
+    if (token === thinkingToken) thinkingPlaying = false;
+  }
+}
+
+export async function startThinkingLoop() {
+  const token = ++thinkingToken;
+  stopThinkingInternal();
+
+  const ctx = await ensureThinkingAudio();
+  const buffer = await ensureThinkingBuffer();
+  if (!ctx || !buffer || !thinkingGain) return;
+
+  try {
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    if (token !== thinkingToken) return;
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(thinkingGain);
+    source.start(0);
+
+    if (token !== thinkingToken) {
+      try {
+        source.stop();
+      } catch {}
+      try {
+        source.disconnect();
+      } catch {}
+      return;
+    }
+
+    thinkingSource = source;
+    thinkingPlaying = true;
+  } catch {
+    if (token === thinkingToken) thinkingPlaying = false;
   }
 }
 
@@ -225,6 +317,31 @@ export async function toggleThinking(durationSec) {
 export async function playSfxOnce(key) {
   stopOneShotSequence(); // 既存のone-shot連続再生があれば止める
   stopThinking();        // 仕様：他SEが鳴ったらthinking停止
+
+  const pool = await getPool(key);
+  if (!pool) return;
+
+  const a = pool.audios[pool.idx];
+  pool.idx = (pool.idx + 1) % pool.audios.length;
+
+  const ended = new Promise((resolve) => {
+    a.addEventListener("ended", resolve, { once: true });
+    a.addEventListener("error", resolve, { once: true });
+  });
+
+  try {
+    a.pause();
+    a.currentTime = 0;
+    a.volume = volume;
+    await a.play();
+    await ended;
+  } catch {
+    // autoplay制限など
+  }
+}
+
+export async function playSfxConcurrent(key) {
+  stopOneShotSequence();
 
   const pool = await getPool(key);
   if (!pool) return;

@@ -8,7 +8,6 @@ const bigBtnLabel = document.querySelector("#bigBtnLabel");
 const nameEl = document.querySelector("#name");
 const scoreEl = document.querySelector("#score");
 const restEl = document.querySelector("#rest");
-const rankEl = document.querySelector("#rank");
 const pointRankEl = document.querySelector("#pointRank");
 const wrongCountEl = document.querySelector("#wrongCount");
 const editNameBtn = document.querySelector("#editNameBtn");
@@ -28,6 +27,9 @@ let myPlayerId = null;
 let myName = ""; // 未入力
 let nameInputEl = null;
 let nameEditMode = null;
+let boardAnswerInputEl = null;
+let boardAnswerDraft = "";
+let lastBoardSubmitted = false;
 let pendingNameChange = null;
 let isQualified = null;
 let isDq = null;
@@ -131,6 +133,66 @@ function setIndicatorError(text) {
   indicatorEl.textContent = text;
 }
 
+function sanitizeBoardAnswerText(raw) {
+  return String(raw ?? "").replace(/\r\n/g, "\n").trim().slice(0, 120);
+}
+
+function renderBoardAnswerIndicator({ value = "", locked = false } = {}) {
+  indicatorEl.classList.remove("is-error");
+  indicatorEl.innerHTML = "";
+
+  const input = document.createElement("input");
+  boardAnswerInputEl = input;
+  input.type = "text";
+  input.className = "indicatorInput boardAnswerInput";
+  input.placeholder = "回答を入力>>";
+  input.maxLength = 120;
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.value = value;
+  input.readOnly = !!locked;
+  indicatorEl.appendChild(input);
+
+  input.addEventListener("input", () => {
+    if (input.readOnly) return;
+    boardAnswerDraft = input.value;
+    bigBtn.disabled = !sanitizeBoardAnswerText(boardAnswerDraft);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitBoardAnswer();
+      input.blur();
+    }
+  });
+
+  return input;
+}
+
+function ensureBoardAnswerIndicator(value = "", locked = false) {
+  const currentValue = String(value ?? "");
+  if (!(boardAnswerInputEl instanceof HTMLInputElement) || !indicatorEl.contains(boardAnswerInputEl)) {
+    renderBoardAnswerIndicator({ value: currentValue, locked });
+    return;
+  }
+
+  indicatorEl.classList.remove("is-error");
+  boardAnswerInputEl.readOnly = !!locked;
+  if (document.activeElement !== boardAnswerInputEl) {
+    boardAnswerInputEl.value = currentValue;
+  }
+}
+
+function submitBoardAnswer() {
+  if (!joined) return;
+  const text = sanitizeBoardAnswerText(boardAnswerInputEl?.value ?? boardAnswerDraft);
+  if (!text) return;
+  boardAnswerDraft = text;
+  if (boardAnswerInputEl) boardAnswerInputEl.value = text;
+  client.emit("SUBMIT_BOARD_ANSWER", { text });
+}
+
 function toShortErrorText(raw) {
   const msg = String(raw ?? "").trim();
   if (!msg) return "ERROR";
@@ -145,8 +207,9 @@ function showNamePrompt() {
 }
 
 function commitNameIfEditing() {
-  const input = indicatorEl.querySelector("input.indicatorInput");
-  if (!input) return false;
+  if (!(nameInputEl instanceof HTMLInputElement) || !indicatorEl.contains(nameInputEl)) {
+    return false;
+  }
 
   finalizeNameEdit({ submit: true });
   return true;
@@ -296,6 +359,11 @@ function isSameRankBucket(a, b) {
   return Number(a?.wrongCount ?? 0) === Number(b?.wrongCount ?? 0);
 }
 
+function getPlayerIdentity(p) {
+  const id = p?._id ?? p?.playerId ?? p?.id;
+  return id == null ? "" : String(id);
+}
+
 function computePointsRankFromPlayers(playersById, myPlayerId, playerOrder = []) {
   const list = Object.entries(playersById || {})
     .map(([id, p]) => ({ ...p, _id: id }))
@@ -308,10 +376,10 @@ function computePointsRankFromPlayers(playersById, myPlayerId, playerOrder = [])
 
   const total = list.length;
   if (!myPlayerId || total === 0) return { rank: null, total, tied: false, tieCount: 0 };
+  const myKey = String(myPlayerId);
 
   const me =
-    list.find((p) => p.playerId === myPlayerId) ||
-    list.find((p) => p._id === myPlayerId);
+    list.find((p) => getPlayerIdentity(p) === myKey);
 
   if (!me) return { rank: null, total, tied: false, tieCount: 0 };
 
@@ -326,7 +394,7 @@ function computePointsRankFromPlayers(playersById, myPlayerId, playerOrder = [])
     if (!lastPlayer || !isSameRankBucket(lastPlayer, player)) {
       currentRank = i + 1;
     }
-    if (player._id === me._id || player.playerId === me.playerId) {
+    if (getPlayerIdentity(player) === getPlayerIdentity(me)) {
       rank = currentRank;
       tieCount = sorted.filter((x) => isSameRankBucket(player, x)).length;
       break;
@@ -337,10 +405,21 @@ function computePointsRankFromPlayers(playersById, myPlayerId, playerOrder = [])
   return { rank, total, tied: tieCount >= 2, tieCount };
 }
 
-// インジケータクリックで名前入力
-indicatorEl.addEventListener("click", () => beginNameEdit("join"));
+// インジケータクリックで名前入力 / ボード解答入力
+indicatorEl.addEventListener("click", () => {
+  if (lastRenderedBoardAnswerEnabled && joined) {
+    boardAnswerInputEl?.focus();
+    return;
+  }
+  beginNameEdit("join");
+});
 indicatorEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") beginNameEdit("join");
+  if (e.key !== "Enter") return;
+  if (lastRenderedBoardAnswerEnabled && joined) {
+    boardAnswerInputEl?.focus();
+    return;
+  }
+  beginNameEdit("join");
 });
 editNameBtn?.addEventListener("click", () => beginNameEdit("rename"));
 
@@ -394,6 +473,11 @@ function handleBigBtn(e) {
 
   }
 
+  if (lastRenderedBoardAnswerEnabled) {
+    submitBoardAnswer();
+    return;
+  }
+
   client.emit("BUZZ", {
     // サーバー側の期待キー：tPress（互換で at も受けるが統一）
     tPress: (typeof client.nowServerMs === "function") ? client.nowServerMs() : Date.now()
@@ -415,9 +499,17 @@ myName = readSavedName().slice(0, 20);
 showNamePrompt();
 nameEl.textContent = myName || "-";
 
+let lastRenderedBoardAnswerEnabled = false;
+
 client.onState((st) => {
+  document.body.classList.toggle("backgroundDarkTheme", !!st.ui?.backgroundDarkTheme);
   // まだJOINしてない場合でもSTATEは来るのでUIは更新する
   const my = (myPlayerId && st.players) ? st.players[myPlayerId] : null;
+  const boardAnswerEnabled = !!st.boardAnswer?.enabled;
+  const myBoardAnswer = myPlayerId ? String(st.boardAnswer?.responses?.[myPlayerId]?.text || "") : "";
+  const myBoardResult = myPlayerId ? String(st.boardAnswer?.responses?.[myPlayerId]?.result || "") : "";
+  const myBoardSubmitted = !!(myPlayerId && st.boardAnswer?.responses?.[myPlayerId]?.submittedAt);
+  const boardAnswerJustCleared = lastBoardSubmitted && !myBoardSubmitted && !myBoardAnswer;
   const scoreHidden = st.scoreHiddenVisible === true;
   if (my?.name) {
     myName = my.name;
@@ -434,7 +526,7 @@ client.onState((st) => {
     st.ui?.showWrongCount !== false ? "" : "none";
 
   const restCount = Number(my?.restCount ?? 0);
-  restEl.textContent = `あと${restCount}問`;
+  restEl.textContent = restCount > 0 ? `残り${restCount}問` : "-";
 
   const status = my?.status || "active";
   isQualified = status === "qualified";
@@ -450,16 +542,25 @@ client.onState((st) => {
   const sorted = order.slice().sort((a,b) => (a.at - b.at) || (a.recvAt - b.recvAt));
   const myRank = myPlayerId ? sorted.findIndex(b => b.playerId === myPlayerId) : -1;
 
-  function ordinalShort(n) {
-    const x = n % 100;
-    if (x >= 11 && x <= 13) return `${n}th`;
+function ordinalShort(n) {
+  const x = n % 100;
+  if (x >= 11 && x <= 13) return `${n}th`;
     switch (n % 10) {
       case 1: return `${n}st`;
       case 2: return `${n}nd`;
       case 3: return `${n}rd`;
       default: return `${n}th`;
-    }
   }
+}
+
+function formatPointRank(pr, scoreHidden) {
+  if (scoreHidden) return "?";
+  if (!pr || pr.rank == null || !Number.isFinite(pr.total) || pr.total <= 0) return "-";
+
+  const crown = pr.rank === 1 ? "👑 " : "";
+  const rankText = ordinalShort(pr.rank);
+  return `${crown}${rankText} / ${pr.total}`;
+}
   function fmtGapMs(ms) {
     if (!Number.isFinite(ms) || ms >= 10000) return null;
     return `+${(ms / 1000).toFixed(3)}s`;
@@ -517,39 +618,69 @@ client.onState((st) => {
     !isQualified &&
     !isDq;
 
-  if (rankEl) {
-    if (idx === -1) {
-      rankEl.textContent = "-";
-    } else {
-      const rank = idx + 1;
-      rankEl.textContent = scoreHidden ? "?" : ordinalShort(rank);
-    }
-  }
-
-    // ポイント順位（サーバー値があればそれを優先）
+    // ポイント順位
   if (pointRankEl) {
     const pr = computePointsRankFromPlayers(st.players, myPlayerId, st.ui?.playerOrder || []);
-    pointRankEl.textContent =
-      scoreHidden ? "?" :
-      pr.rank == null ? "-" :
-      pr.tied ? `T${ordinalShort(pr.rank)} / ${pr.total}` :
-      `${ordinalShort(pr.rank)} / ${pr.total}`;
+    pointRankEl.textContent = formatPointRank(pr, scoreHidden);
   }
 
-    // ---- ボタン演出状態 ----
+  // ---- ボタン演出状態 ----
   const cur = getCurrentRespondent(st);
   const isCurrent = !!(cur && myPlayerId && cur.playerId === myPlayerId);
   const isAnswering = isCurrent && st.judge?.status === "in_progress";
 
   // インジケータ表示
   if (!joined) {
+    lastRenderedBoardAnswerEnabled = false;
+    lastBoardSubmitted = false;
+    boardAnswerDraft = "";
+    boardAnswerInputEl = null;
     // 接続前は名前プロンプト（指定）
     showNamePrompt();
-    restEl.textContent = "あと0問";
+    restEl.textContent = "-";
     bigBtnLabel.textContent = "CONNECT";
     bigBtn.disabled = false; // 接続ボタンとして押せる
     return;
   }
+
+  if (boardAnswerEnabled) {
+    if (nameInputEl) {
+      bigBtnLabel.textContent = "SUBMIT";
+      bigBtn.disabled = true;
+      lastRenderedBoardAnswerEnabled = true;
+      lastBoardSubmitted = myBoardSubmitted;
+      return;
+    }
+    if (boardAnswerJustCleared) {
+      boardAnswerDraft = "";
+      if (boardAnswerInputEl instanceof HTMLInputElement) {
+        boardAnswerInputEl.value = "";
+        boardAnswerInputEl.readOnly = false;
+      }
+    } else if (!(boardAnswerInputEl instanceof HTMLInputElement) || document.activeElement !== boardAnswerInputEl) {
+      boardAnswerDraft = myBoardAnswer;
+    }
+    ensureBoardAnswerIndicator(boardAnswerDraft, myBoardSubmitted);
+    bigBtnLabel.textContent = myBoardSubmitted ? "SENT" : "SUBMIT";
+    bigBtn.disabled = myBoardSubmitted || !sanitizeBoardAnswerText(boardAnswerDraft);
+    applyBtnState({
+      isBlink: false,
+      isLit: false,
+      isWrong: myBoardResult === "wrong",
+      isCorrect: myBoardResult === "correct",
+      isDisabledDim: false
+    });
+    lastRenderedBoardAnswerEnabled = true;
+    lastBoardSubmitted = myBoardSubmitted;
+    return;
+  }
+
+  if (lastRenderedBoardAnswerEnabled) {
+    boardAnswerDraft = "";
+    boardAnswerInputEl = null;
+    lastRenderedBoardAnswerEnabled = false;
+  }
+  lastBoardSubmitted = false;
 
   if (isQualified) {
     const r = Number(my.passRank ?? 0);

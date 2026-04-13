@@ -1,11 +1,15 @@
 import { createClient } from "/common/common.js";
 import { playSfxOnce, playSfxSequence, stopAllSfx, toggleThinking, warmupSfx } from "/common/sfx.js";
+import { buildRuleOverlayLines, formatSignedPoints } from "/common/ruleCatalog.js";
 
 const client = createClient({ screen: "visualizer" });
 const joinQrOverlay = document.querySelector("#joinQrOverlay");
 const joinQrImg = document.querySelector("#joinQrImg");
 const joinQrText = document.querySelector("#joinQrText");
 const joinQrHint = document.querySelector("#joinQrHint");
+const rulesOverlay = document.querySelector("#rulesOverlay");
+const rulesOverlayBody = document.querySelector("#rulesOverlayBody");
+const overlayFadeTimers = new WeakMap();
 
 let lastState = null;
 
@@ -33,14 +37,16 @@ if (window.QUMO_MOD_API) {
 
 let currentMainModId = null;
 let mainFrame = null;
+const latestModEvents = new Map();
 const MOD_OVERLAY_WIDTH = 252;
 const MOD_OVERLAY_GUTTER = 28;
 
-function loadMain(modId) {
+function loadMain(modId, options = {}) {
   const id = String(modId || "").trim();
+  const force = !!options.force;
   if (!id) return;
 
-  if (currentMainModId === id) return;
+  if (!force && currentMainModId === id) return;
   currentMainModId = id;
 
   const root = document.getElementById("mod-main-root");
@@ -52,7 +58,8 @@ function loadMain(modId) {
   root.innerHTML = "";
 
   const iframe = document.createElement("iframe");
-  iframe.src = `/mods/${encodeURIComponent(id)}/visualizer/main.html`;
+  const bust = force ? `?v=${Date.now()}` : "";
+  iframe.src = `/mods/${encodeURIComponent(id)}/visualizer/main.html${bust}`;
   iframe.className = "modMainFrame";
   iframe.setAttribute("title", `MOD main: ${id}`);
   iframe.addEventListener("load", () => {
@@ -61,11 +68,24 @@ function loadMain(modId) {
     if (lastState) {
       iframe.contentWindow?.postMessage({ type: "MOD_STATE", state: lastState }, "*");
     }
+    const latestEvent = latestModEvents.get(id);
+    if (latestEvent) {
+      iframe.contentWindow?.postMessage(
+        { type: "MOD_EVENT", modId: id, event: latestEvent },
+        "*"
+      );
+    }
     if (id === "visual_quiz") {
       client.send({
         type: "MOD_CMD",
         modId: id,
         cmd: { type: "VQ_SYNC_STATE" }
+      });
+    } else if (id === "intro_quiz") {
+      client.send({
+        type: "MOD_CMD",
+        modId: id,
+        cmd: { type: "IQ_SYNC_STATE" }
       });
     }
   });
@@ -92,13 +112,25 @@ function syncEmbeddedModLayout() {
 
 client.onMessage?.((msg) => {
   if (msg?.type === "RELOAD") {
-    console.log("[visualizer] reload by MOD change");
+    console.log("[visualizer] soft reload by MOD change");
+    const activeModId = String(lastState?.mods?.active || currentMainModId || "").trim();
+    if (activeModId) {
+      loadMain(activeModId, { force: true });
+      syncEmbeddedModLayout();
+      if (mainFrame?.contentWindow && lastState) {
+        mainFrame.contentWindow.postMessage({ type: "MOD_STATE", state: lastState }, "*");
+      }
+      return;
+    }
     location.reload();
     return;
   }
 
   // 汎用：MOD_EVENT を受け取ったら
   if (msg?.type === "MOD_EVENT") {
+    if (msg.modId) {
+      latestModEvents.set(String(msg.modId), msg.event || null);
+    }
     const activeId = lastState?.mods?.active || null;
     console.log("[MOD_EVENT]", { activeId, msgModId: msg.modId, hasMain: !!mainFrame });
     // 1) MOD API（親側）へ流す
@@ -183,7 +215,7 @@ function formatVerticalBuzzOrder(order, gapText) {
   if (!order) return "";
   const ord = ordinalShortEn(order);
   if (order === 1 || !gapText || gapText === "-") {
-    return `<span class="verticalBuzzRank">${ord}</span>`;
+    return `<span class="verticalBuzzRank">${ord}</span><span class="verticalBuzzGap is-empty">&nbsp;</span>`;
   }
   return `<span class="verticalBuzzRank">${ord}</span><span class="verticalBuzzGap">${escapeHtml(gapText)}</span>`;
 }
@@ -259,24 +291,54 @@ function buildRankMap(players, connectionOrderMap) {
 
 function renderRankBadge(rank, className) {
   if (rank == null || rank === "" || !Number.isFinite(Number(rank))) {
-    return `<span class="${className} rankBadge is-hidden"><span>?th</span></span>`;
+    return `<span class="${className} rankBadge is-hidden"><span class="rankBadgeText">?th</span></span>`;
   }
   const text = ordinalShortEn(rank);
   if (rank === 1) {
-    return `<span class="${className} rankBadge is-first"><i class="fa-solid fa-crown" aria-hidden="true"></i><span>${text}</span></span>`;
+    return `<span class="${className} rankBadge is-first"><span class="rankBadgeCrown"><i class="fa-solid fa-crown" aria-hidden="true"></i></span><span class="rankBadgeText">${text}</span></span>`;
   }
-  return `<span class="${className} rankBadge"><span>${text}</span></span>`;
+  return `<span class="${className} rankBadge"><span class="rankBadgeText">${text}</span></span>`;
+}
+
+function setOverlayVisibility(element, visible) {
+  if (!element) return;
+
+  const existingTimer = overlayFadeTimers.get(element);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    overlayFadeTimers.delete(element);
+  }
+
+  if (visible) {
+    element.hidden = false;
+    element.classList.remove("is-visible", "is-hiding");
+    void element.offsetWidth;
+    requestAnimationFrame(() => {
+      element.classList.add("is-visible");
+    });
+    return;
+  }
+
+  if (element.hidden) return;
+  element.classList.remove("is-visible");
+  element.classList.add("is-hiding");
+  const timer = setTimeout(() => {
+    element.hidden = true;
+    element.classList.remove("is-hiding");
+    overlayFadeTimers.delete(element);
+  }, 260);
+  overlayFadeTimers.set(element, timer);
 }
 
 function renderJoinQr(st) {
   const on = !!st.ui?.joinQrVisible;
 
   if (!on) {
-    joinQrOverlay.hidden = true;
+    setOverlayVisibility(joinQrOverlay, false);
     return;
   }
 
-  joinQrOverlay.hidden = false;
+  setOverlayVisibility(joinQrOverlay, true);
 
   const url =
     st.ui?.joinQrTargetUrl ||
@@ -299,6 +361,78 @@ function renderJoinQr(st) {
 
   joinQrHint.textContent = "";
   joinQrImg.src = dataUrl;
+}
+
+function renderRulesOverlay(st) {
+  const visible = st?.ui?.rulesOverlayVisible === true;
+  if (!rulesOverlay || !rulesOverlayBody) return;
+  setOverlayVisibility(rulesOverlay, visible);
+  if (!visible) return;
+
+  const lines = buildRuleOverlayLines(st);
+  rulesOverlayBody.innerHTML = lines
+    .map((line) => {
+      const paragraphClass = line.paragraphStart ? " rulesOverlayLine-paragraphStart" : "";
+      if (line.kind === "bullet") {
+        return `<div class="rulesOverlayLine rulesOverlayLine-bullet${paragraphClass}"><span class="rulesOverlayBullet" aria-hidden="true"></span><span class="rulesOverlayText">${escapeHtml(line.text)}</span></div>`;
+      }
+      if (line.kind === "note") {
+        return `<div class="rulesOverlayLine rulesOverlayLine-note${paragraphClass}">${escapeHtml(line.text)}</div>`;
+      }
+      if (line.kind === "scoreRule") {
+        const wrongPoints = Number(line.wrongPoints ?? 0);
+        const restPenalty = Number(line.restPenalty ?? 0);
+        const rows = [];
+
+        if (line.showCorrectLine !== false) {
+          rows.push([
+            '<span class="rulesTerm rulesTerm-correct">正解</span>',
+            `<span class="rulesValue rulesValue-correct">${escapeHtml(formatSignedPoints(line.correctPoints))}P</span>`
+          ]);
+        }
+
+        const wrongLine = ['<span class="rulesTerm rulesTerm-wrong">誤答</span>'];
+
+        if (wrongPoints !== 0) {
+          wrongLine.push(`<span class="rulesValue rulesValue-wrong">${escapeHtml(formatSignedPoints(wrongPoints))}P</span>`);
+        }
+        if (restPenalty >= 1) {
+          if (wrongPoints !== 0) {
+            wrongLine.push('<span class="rulesJoin">+</span>');
+          }
+          wrongLine.push(`<span class="rulesValue rulesValue-rest">${escapeHtml(String(restPenalty))}回休み</span>`);
+        }
+
+        if (line.showWrongLine !== false) {
+          rows.push(wrongLine);
+        }
+
+        if (!rows.length) return "";
+
+        return `<div class="rulesOverlayLine rulesOverlayLine-bullet${paragraphClass}"><span class="rulesOverlayBullet" aria-hidden="true"></span><span class="rulesOverlayText rulesOverlayText-score">${rows.map((row) => `<span class="rulesScoreRow">${row.join(" ")}</span>`).join("")}</span></div>`;
+      }
+      if (line.kind === "countTargets") {
+        const items = Array.isArray(line.items) ? line.items : [];
+        const html = items.map((item) => {
+          const isCorrect = String(item).includes("○");
+          const className = isCorrect ? "rulesCountTarget rulesCountTarget-correct" : "rulesCountTarget rulesCountTarget-wrong";
+          return `<span class="${className}">${escapeHtml(item)}</span>`;
+        }).join('<span class="rulesCountTargetSpacer"></span>');
+        return `<div class="rulesOverlayLine rulesOverlayLine-bullet rulesOverlayLine-countTargets${paragraphClass}"><span class="rulesOverlayBullet" aria-hidden="true"></span><span class="rulesOverlayText">${html}</span></div>`;
+      }
+      if (line.kind === "targets") {
+        const parts = [];
+        if (line.qualifyEnabled) {
+          parts.push(`<span class="rulesTargetRow"><span class="rulesTargetText rulesTargetText-correct">${escapeHtml(String(line.qualifyScore))}Pで勝ち抜け</span></span>`);
+        }
+        if (line.dqEnabled) {
+          parts.push(`<span class="rulesTargetRow"><span class="rulesTargetText rulesTargetText-wrong">${escapeHtml(String(line.dqScore))}Pで失格</span></span>`);
+        }
+        return `<div class="rulesOverlayLine rulesOverlayLine-bullet${paragraphClass}"><span class="rulesOverlayBullet" aria-hidden="true"></span><span class="rulesOverlayText rulesOverlayText-targets">${parts.join("")}</span></div>`;
+      }
+      return `<div class="rulesOverlayLine${paragraphClass}">${escapeHtml(line.text || "")}</div>`;
+    })
+    .join("");
 }
 
 function getOrderedConnectedPlayers(st) {
@@ -397,20 +531,24 @@ function renderPlayers(st, mode = "full") {
   const showMarkWrong = ui.showMarkWrong !== false;
   const isOverlayMode = mode === "overlay";
   const isVerticalLayout = ui.playerTileLayout === "vertical" && mode === "full";
+  const isSlimLayout = ui.playerTileLayout === "slim" && mode === "full";
+  const isOverlayLikeLayout = isOverlayMode || isSlimLayout;
   const visualizerSortMode = String(ui.visualizerSortMode || "manual");
   const showVerticalScore = ui.showVerticalScore !== false;
   const showVerticalCorrectCount = ui.showVerticalCorrectCount !== false;
   const showVerticalWrongCount = ui.showVerticalWrongCount !== false;
   const showVerticalRestCount = ui.showVerticalRestCount !== false;
   const showVerticalBuzzOrder = ui.showVerticalBuzzOrder !== false;
-  const showOverlayBuzzOrder = isOverlayMode && (st.buzzer?.buzzOrder?.length ?? 0) > 0;
+  const showOverlayBuzzOrder = isOverlayLikeLayout && (st.buzzer?.buzzOrder?.length ?? 0) > 0;
   const rankMap = buildRankMap(players, connectionOrderMap);
   const scoreHidden = st.scoreHiddenVisible === true;
   const hiddenScoreSnapshot = Array.isArray(st.ui?.hiddenScoreRankSortOrder) ? st.ui.hiddenScoreRankSortOrder : [];
   const hiddenRankLocked = scoreHidden && hiddenScoreSnapshot.length > 0;
+  const boardMode = !!st.boardAnswer?.enabled && !!st.boardAnswer?.visibleOnVisualizer;
 
   grid.classList.toggle("verticalMode", isVerticalLayout);
   grid.classList.toggle("overlayMode", isOverlayMode);
+  grid.classList.toggle("slimMode", isSlimLayout);
 
   // 並び：押した人（押下順）→ まだ押してない人（名前順）
   const rankSortedPlayers = hiddenRankLocked
@@ -427,7 +565,7 @@ function renderPlayers(st, mode = "full") {
     : showOverlayBuzzOrder
     ? [...pressed, ...notPressed]
     : rankSortedPlayers;
-  const sorted = isOverlayMode
+  const sorted = isOverlayLikeLayout
     ? rankModePlayers
     : visualizerSortMode === "rank"
     ? rankModePlayers
@@ -463,6 +601,9 @@ function renderPlayers(st, mode = "full") {
     const info = orderMap.get(p.id) || null;
     const order = info ? info.order : null;
     const scoreRank = scoreHidden ? null : (rankMap.get(p.id) ?? 1);
+    const boardEntry = st.boardAnswer?.responses?.[p.id] || null;
+    const boardText = String(boardEntry?.text || "");
+    const boardResult = String(boardEntry?.result || "");
 
     let gapText = "-";
     if (info && firstAt != null && order >= 2) gapText = formatGapSeconds(info.at - firstAt);
@@ -470,10 +611,11 @@ function renderPlayers(st, mode = "full") {
     const buzzOrderText = formatBuzzOrder(order, gapText);
 
     const isCurrent = currentPlayerId === p.id;
-    const isWronged = !!wrongSet[p.id];
+    const isWronged = !!wrongSet[p.id] || boardResult === "wrong";
     const isCorrect =
-      st.judge?.lastResult?.type === "correct" &&
-      st.judge.lastResult.playerId === p.id;
+      (st.judge?.lastResult?.type === "correct" &&
+      st.judge.lastResult.playerId === p.id) ||
+      boardResult === "correct";
 
     const restCount = Number(p.restCount ?? 0);
     const isResting = restCount > 0;
@@ -485,6 +627,10 @@ function renderPlayers(st, mode = "full") {
 
     const correctCount = Number(p.correctCount ?? 0);
     const wrongCount = Number(p.wrongCount ?? 0);
+    const boardAnswerHtml = boardMode
+      ? `<div class="visualBoardAnswer${boardText ? "" : " is-empty"}">${boardText ? escapeHtml(boardText) : ""}</div>`
+      : "";
+    const boardResultClass = boardResult === "correct" ? " board-result-correct" : boardResult === "wrong" ? " board-result-wrong" : "";
 
     const markCorrectText = showMarks && showMarkCorrect ? (scoreHidden ? "?" : repeatSafe("○", correctCount)) : "";
     const markWrongText = showMarks && showMarkWrong ? (scoreHidden ? "?" : repeatSafe("✕", wrongCount)) : "";
@@ -501,10 +647,12 @@ function renderPlayers(st, mode = "full") {
       (reachLose ? `<span class="reachTag reach-lose">REACH</span>` : "");
 
     const tile = document.createElement("div");
-    tile.className =
-      "tile" +
+      tile.className =
+        "tile" +
       (isVerticalLayout ? " verticalTile" : "") +
-      (isQualified ? " qualified" : "") +
+      (isSlimLayout ? " slimTile" : "") +
+        boardResultClass +
+        (isQualified ? " qualified" : "") +
       (isDq ? " disqualified" : "") +
       (info ? " pressed" : "") +
       (order === 1 ? " first" : "") +
@@ -517,8 +665,8 @@ function renderPlayers(st, mode = "full") {
       const verticalBuzzText = showVerticalBuzzOrder ? formatVerticalBuzzOrder(order, gapText) : "";
       const verticalStats = [
         showVerticalScore ? `<span class="verticalStat verticalStat-score">${scoreHidden ? "?" : Number(p.score ?? 0)}</span>` : "",
-        showVerticalCorrectCount ? `<span class="verticalStat verticalStat-correct"><span class="verticalStatGlyph verticalStatGlyph-circle">○</span><span class="verticalStatValue">${scoreHidden ? "?" : correctCount}</span></span>` : "",
-        showVerticalWrongCount ? `<span class="verticalStat verticalStat-wrong"><span class="verticalStatGlyph verticalStatGlyph-cross">✕</span><span class="verticalStatValue">${scoreHidden ? "?" : wrongCount}</span></span>` : "",
+        showVerticalCorrectCount ? `<span class="verticalStat verticalStat-correct"><span class="verticalStatGlyph verticalStatGlyph-circle"><i class="fa-regular fa-circle" aria-hidden="true"></i></span><span class="verticalStatValue">${scoreHidden ? "?" : correctCount}</span></span>` : "",
+        showVerticalWrongCount ? `<span class="verticalStat verticalStat-wrong"><span class="verticalStatGlyph verticalStatGlyph-cross"><i class="fa-solid fa-xmark" aria-hidden="true"></i></span><span class="verticalStatValue">${scoreHidden ? "?" : wrongCount}</span></span>` : "",
         showVerticalRestCount ? `<span class="verticalStat verticalStat-rest"><span class="verticalStatGlyph verticalStatGlyph-rest">休</span><span class="verticalStatValue">${restCount}</span></span>` : ""
       ].filter(Boolean).join("");
 
@@ -528,7 +676,7 @@ function renderPlayers(st, mode = "full") {
         <div class="verticalBuzzRow${verticalBuzzText ? "" : " is-empty"}">${verticalBuzzText || "&nbsp;"}</div>
         <div class="verticalStats">${verticalStats}</div>
       `;
-    } else if (isOverlayMode) {
+    } else if (isOverlayLikeLayout) {
       const showBuzzRankOnly = showOverlayBuzzOrder && !!order;
       const overlayPrimaryText = showBuzzRankOnly
         ? (scoreHidden ? "?" : ordinalShortEn(order))
@@ -578,6 +726,7 @@ function renderPlayers(st, mode = "full") {
           ${reachHtml}
           ${showScore ? `<div class="score">${scoreHidden ? "?" : Number(p.score ?? 0)}</div>` : ``}
         </div>
+        ${boardAnswerHtml}
         ${(countSummary || buzzOrderText) ? `
         <div class="countSummaryRow">
           ${buzzOrderText ? `<div class="buzzOrderInline">${escapeHtml(buzzOrderText)}</div>` : `<div></div>`}
@@ -605,6 +754,7 @@ function renderPlayers(st, mode = "full") {
 client.onState((st) => {
   lastState = st;
   document.body.classList.toggle("swapJudgeColors", !!st.ui?.swapJudgeColors);
+  document.body.classList.toggle("backgroundDarkTheme", !!st.ui?.backgroundDarkTheme);
   document.body.classList.toggle("playerTileDarkTheme", !!st.ui?.playerTileDarkTheme);
 
   // 先にUIを更新（音で描画が遅れないようにする）
@@ -616,6 +766,7 @@ client.onState((st) => {
   }
 
   renderJoinQr(st);
+  renderRulesOverlay(st);
 
   function computeHudMode(_st, modActive) {
     return modActive ? "overlay" : "full";
