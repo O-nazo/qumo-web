@@ -5,7 +5,9 @@ dist/
 dist_electron/
 build/
 /assets/
-/mods/visual_quiz/assets/q/
+/mods/visual_quiz/assets/q/*
+!/mods/visual_quiz/assets/q/sample/
+!/mods/visual_quiz/assets/q/sample/**
 # packaged binaries
 *.exe
 *.msi
