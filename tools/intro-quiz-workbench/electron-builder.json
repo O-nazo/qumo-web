@@ -1,0 +1,26 @@
+{
+  "appId": "com.example.intro-quiz-workbench",
+  "productName": "Intro Quiz Workbench",
+  "asar": true,
+  "files": [
+    "tools/intro-quiz-workbench/**",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "tools/intro-quiz-workbench/electron-main.js"
+  },
+  "win": {
+    "icon": "build/icon.ico",
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico"
+  },
+  "directories": {
+    "output": "dist_intro_workbench"
+  }
+}

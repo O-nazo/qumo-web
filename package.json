@@ -3,26 +3,22 @@
   "version": "1.1.0",
   "private": true,
   "main": "electron/main.js",
-
   "scripts": {
     "start": "electron .",
     "intro-workbench": "node tools/intro-quiz-workbench/server.js",
-
     "tunnel": "node server/run-tunnel.js",
-
     "dev": "concurrently --kill-others --kill-signal SIGINT -n app,tunnel -c auto \"npm:start\" \"npm:tunnel\"",
-
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "intro-workbench:electron": "electron tools/intro-quiz-workbench/electron-main.js",
+    "intro-workbench:dist:win": "electron-builder --config tools/intro-quiz-workbench/electron-builder.json --win"
   },
-
   "build": {
     "appId": "com.example.qumo.web",
     "productName": "QUMO-WEB",
     "asar": true,
-
     "files": [
       "electron/**",
       "server/**",
@@ -31,7 +27,6 @@
       "!QUMO_web_LOGO.af",
       "package.json"
     ],
-
     "extraResources": [
       {
         "from": "assets",
@@ -50,7 +45,6 @@
         "to": "bin/cloudflared.exe"
       }
     ],
-
     "win": {
       "icon": "build/icon.ico",
       "target": [
@@ -58,23 +52,19 @@
         "portable"
       ]
     },
-
     "nsis": {
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico"
     },
-
     "directories": {
       "output": "dist_electron"
     }
   },
-
   "dependencies": {
     "express": "^4.19.2",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   },
-
   "devDependencies": {
     "concurrently": "^9.2.1",
     "electron": "^40.0.0",

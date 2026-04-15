@@ -3,6 +3,7 @@ node_modules
 .env.*
 dist/
 dist_electron/
+dist_intro_workbench/
 build/
 /assets/
 /mods/visual_quiz/assets/q/*
@@ -14,3 +15,4 @@ build/
 *.af
 # tools
 bin/cloudflared.exe
+tools/intro-quiz-workbench/tmp-*.csv

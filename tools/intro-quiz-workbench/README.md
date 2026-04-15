@@ -13,11 +13,31 @@
 
 ## 起動
 
+ブラウザ版:
+
 ```bash
 npm run intro-workbench
 ```
 
 起動後、ブラウザで `http://localhost:4315` を開いてください。
+
+Electron版:
+
+```bash
+npm run intro-workbench:electron
+```
+
+ウィンドウを閉じるとアプリも終了します。
+
+## EXE発行
+
+Windows向けEXE:
+
+```bash
+npm run intro-workbench:dist:win
+```
+
+出力先は `dist_intro_workbench/` です。
 
 ## 自動保存の使い方
 

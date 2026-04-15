@@ -434,9 +434,37 @@ app.get("/api/ping", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(port, () => {
-  console.log(`Intro Quiz Workbench: http://localhost:${port}`);
-});
+function startServer(options = {}) {
+  const listenPort = Number.isFinite(Number(options.port)) ? Number(options.port) : port;
+  return new Promise((resolve, reject) => {
+    const server = app.listen(listenPort, () => {
+      const address = server.address();
+      resolve({
+        app,
+        server,
+        port: typeof address === "object" && address ? address.port : listenPort
+      });
+    });
+    server.on("error", reject);
+  });
+}
+
+module.exports = {
+  app,
+  startServer
+};
+
+if (require.main === module) {
+  startServer()
+    .then(({ port: startedPort }) => {
+      console.log(`Intro Quiz Workbench: http://localhost:${startedPort}`);
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+}
+
 
 
 
