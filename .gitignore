@@ -4,8 +4,8 @@ node_modules
 dist/
 dist_electron/
 build/
-assets/
-mods/visual_quiz/assets/q/
+/assets/
+/mods/visual_quiz/assets/q/
 # packaged binaries
 *.exe
 *.msi
