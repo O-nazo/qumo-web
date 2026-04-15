@@ -30,6 +30,7 @@ let nameEditMode = null;
 let boardAnswerInputEl = null;
 let boardAnswerDraft = "";
 let lastBoardSubmitted = false;
+let lastBoardActionKind = "off";
 let pendingNameChange = null;
 let isQualified = null;
 let isDq = null;
@@ -113,6 +114,69 @@ function getCurrentRespondent(st) {
   return st.buzzer?.buzzOrder?.[st.judge.currentIndex] ?? null;
 }
 
+function getDisplayBuzzEntries(st) {
+  const rawMode = String(st?.rules?.buzzMode ?? "").toLowerCase();
+  const isEarlyMode = rawMode === "early_endless" || rawMode === "early_single" || rawMode === "survival_endless" || rawMode === "survival_single" || rawMode === "hayanuke_endless" || rawMode === "hayanuke_single";
+  const buzzOrder = Array.isArray(st?.buzzer?.buzzOrder) ? st.buzzer.buzzOrder : [];
+  if (!isEarlyMode) {
+    return buzzOrder.map((entry, idx) => ({
+      playerId: entry.playerId,
+      at: entry.at,
+      recvAt: entry.recvAt,
+      order: idx + 1
+    }));
+  }
+
+  const clearedOrder = Array.isArray(st?.judge?.clearedOrder) ? st.judge.clearedOrder : [];
+  const entries = [];
+  const seen = new Set();
+  clearedOrder.forEach((playerId, idx) => {
+    const key = String(playerId || "");
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    entries.push({ playerId: key, at: null, recvAt: null, order: idx + 1 });
+  });
+  let nextOrder = entries.length + 1;
+  for (const entry of buzzOrder) {
+    const key = String(entry?.playerId || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ playerId: key, at: entry?.at ?? null, recvAt: entry?.recvAt ?? null, order: nextOrder });
+    nextOrder += 1;
+  }
+  return entries;
+}
+
+function getBoardPlayerMode(st, playerId) {
+  const board = st?.boardAnswer || {};
+  if (!board.enabled || !playerId) return { kind: "off", locked: false };
+
+  const mode = String(board.mode || "standard");
+  const phase = String(board.phase || "idle");
+  const current = getCurrentRespondent(st);
+  const isCurrent = current?.playerId === playerId;
+  const displayBuzzEntries = getDisplayBuzzEntries(st);
+  const alreadyBuzzed = !!(playerId && displayBuzzEntries.some((b) => b.playerId === playerId));
+
+  if (mode === "standard") {
+    return { kind: phase === "accepting" ? "submit" : "wait", locked: phase !== "accepting" };
+  }
+  if (mode === "board_to_buzz") {
+    if (phase === "accepting" && !alreadyBuzzed) return { kind: "write_buzz", locked: false };
+    return { kind: "wait", locked: true };
+  }
+  if (mode === "buzz_to_board") {
+    if (phase === "accepting" && isCurrent) return { kind: "submit", locked: false };
+    if (phase === "accepting") return { kind: "wait", locked: true };
+    return { kind: "buzz", locked: true };
+  }
+  if (mode === "buzz_plus_board") {
+    if (phase === "accepting") return { kind: "submit", locked: false };
+    return { kind: "buzz", locked: true };
+  }
+  return { kind: "wait", locked: true };
+}
+
 function applyBtnState({ isBlink, isLit, isWrong, isCorrect, isDisabledDim }) {
   bigBtn.classList.toggle("state-blink", !!isBlink);
   bigBtn.classList.toggle("state-lit", !!isLit);
@@ -151,6 +215,7 @@ function renderBoardAnswerIndicator({ value = "", locked = false } = {}) {
   input.spellcheck = false;
   input.value = value;
   input.readOnly = !!locked;
+  input.title = locked ? "送信済みのため編集できません" : "";
   indicatorEl.appendChild(input);
 
   input.addEventListener("input", () => {
@@ -179,6 +244,7 @@ function ensureBoardAnswerIndicator(value = "", locked = false) {
 
   indicatorEl.classList.remove("is-error");
   boardAnswerInputEl.readOnly = !!locked;
+  boardAnswerInputEl.title = locked ? "送信済みのため編集できません" : "";
   if (document.activeElement !== boardAnswerInputEl) {
     boardAnswerInputEl.value = currentValue;
   }
@@ -187,10 +253,11 @@ function ensureBoardAnswerIndicator(value = "", locked = false) {
 function submitBoardAnswer() {
   if (!joined) return;
   const text = sanitizeBoardAnswerText(boardAnswerInputEl?.value ?? boardAnswerDraft);
-  if (!text) return;
+  if (!text) return false;
   boardAnswerDraft = text;
   if (boardAnswerInputEl) boardAnswerInputEl.value = text;
   client.emit("SUBMIT_BOARD_ANSWER", { text });
+  return true;
 }
 
 function toShortErrorText(raw) {
@@ -203,7 +270,7 @@ function toShortErrorText(raw) {
 }
 
 function showNamePrompt() {
-  setIndicatorText(myName ? myName : "(名前入力)");
+  setIndicatorText(myName ? myName : "(NAME)");
 }
 
 function commitNameIfEditing() {
@@ -273,7 +340,7 @@ function finalizeNameEdit({ submit }) {
   if (!nextName) {
     writeSavedName("");
     showNamePrompt();
-    setIndicatorText("名前入力");
+  setIndicatorText("NAME");
     nameEl.textContent = myName || "-";
     return;
   }
@@ -442,7 +509,7 @@ function handleBigBtn(e) {
     if (joining) return;
 
     if (!myName.trim()) {
-      setIndicatorText("名前入力");
+      setIndicatorText("NAME");
       return;
     }
 
@@ -465,7 +532,7 @@ function handleBigBtn(e) {
     const ws = findWs(client);
     if (ws) {
       // 0=CONNECTING 1=OPEN 2=CLOSING 3=CLOSED
-      setIndicatorText("接続中");
+      setIndicatorText("CONNECTING");
     }
 
     client.join({ screen: "player", name: myName });
@@ -474,7 +541,24 @@ function handleBigBtn(e) {
   }
 
   if (lastRenderedBoardAnswerEnabled) {
-    submitBoardAnswer();
+    if (lastBoardActionKind === "submit") {
+      submitBoardAnswer();
+    } else if (lastBoardActionKind === "write_buzz") {
+      if (!submitBoardAnswer()) return;
+      client.emit("BUZZ", {
+        tPress: (typeof client.nowServerMs === "function") ? client.nowServerMs() : Date.now(),
+        bestRtt: (typeof client.getClockSyncStats === "function")
+          ? client.getClockSyncStats()?.bestRtt
+          : null
+      });
+    } else if (lastBoardActionKind === "buzz") {
+      client.emit("BUZZ", {
+        tPress: (typeof client.nowServerMs === "function") ? client.nowServerMs() : Date.now(),
+        bestRtt: (typeof client.getClockSyncStats === "function")
+          ? client.getClockSyncStats()?.bestRtt
+          : null
+      });
+    }
     return;
   }
 
@@ -509,6 +593,8 @@ client.onState((st) => {
   // まだJOINしてない場合でもSTATEは来るのでUIは更新する
   const my = (myPlayerId && st.players) ? st.players[myPlayerId] : null;
   const boardAnswerEnabled = !!st.boardAnswer?.enabled;
+  const boardQuizMode = String(st.boardAnswer?.mode || "standard");
+  const boardPlayerMode = getBoardPlayerMode(st, myPlayerId);
   const myBoardAnswer = myPlayerId ? String(st.boardAnswer?.responses?.[myPlayerId]?.text || "") : "";
   const myBoardResult = myPlayerId ? String(st.boardAnswer?.responses?.[myPlayerId]?.result || "") : "";
   const myBoardSubmitted = !!(myPlayerId && st.boardAnswer?.responses?.[myPlayerId]?.submittedAt);
@@ -537,12 +623,12 @@ client.onState((st) => {
   const isModDisabled = !!my?.modDisabled;
 
     // --- 早押し順関連（必須） ---
-  const order = st.buzzer?.buzzOrder || [];
+  const order = getDisplayBuzzEntries(st);
   const idx = myPlayerId ? order.findIndex(b => b.playerId === myPlayerId) : -1;
   const alreadyBuzzed = !!myPlayerId && order.some(b => b.playerId === myPlayerId);
 
   // 自分の押下順・着差
-  const sorted = order.slice().sort((a,b) => (a.at - b.at) || (a.recvAt - b.recvAt));
+  const sorted = order.slice().sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
   const myRank = myPlayerId ? sorted.findIndex(b => b.playerId === myPlayerId) : -1;
 
 function ordinalShort(n) {
@@ -556,18 +642,30 @@ function ordinalShort(n) {
   }
 }
 
-function formatPointRank(pr, scoreHidden) {
+function renderPointRank(pr, scoreHidden) {
   if (scoreHidden) return "?";
   if (!pr || pr.rank == null || !Number.isFinite(pr.total) || pr.total <= 0) return "-";
 
-  const crown = pr.rank === 1 ? "👑 " : "";
-  const rankText = ordinalShort(pr.rank);
-  return `${crown}${rankText} / ${pr.total}`;
+  const rankText = `${ordinalShort(pr.rank)} / ${pr.total}`;
+  if (pr.rank !== 1) return rankText;
+
+  return `<span class="pointRankValue is-first"><span class="pointRankCrown"><i class="fa-solid fa-crown" aria-hidden="true"></i></span><span>${rankText}</span></span>`;
 }
   function fmtGapMs(ms) {
     if (!Number.isFinite(ms) || ms >= 10000) return null;
     return `+${(ms / 1000).toFixed(3)}s`;
   }
+  function getBuzzRankIndicator() {
+    if (myRank < 0) return "";
+    const r = myRank + 1;
+    if (r === 1) return ordinalShort(r);
+    const baseAt = sorted.find((entry) => Number.isFinite(Number(entry?.at)))?.at ?? null;
+    const currentAt = sorted[myRank]?.at;
+    const gap = (Number.isFinite(Number(baseAt)) && Number.isFinite(Number(currentAt))) ? (currentAt - baseAt) : null;
+    const gapText = fmtGapMs(gap);
+    return gapText ? `${ordinalShort(r)} ${gapText}` : ordinalShort(r);
+  }
+  const buzzRankIndicator = alreadyBuzzed ? getBuzzRankIndicator() : "";
   function nextEligiblePlayerId(st, sorted) {
     const curIdx = Number(st.judge?.currentIndex ?? -1);
     if (curIdx < 0) return null;
@@ -622,10 +720,10 @@ function formatPointRank(pr, scoreHidden) {
     !isQualified &&
     !isDq;
 
-    // ポイント順位
+  // ポイント順位
   if (pointRankEl) {
     const pr = computePointsRankFromPlayers(st.players, myPlayerId, st.ui?.playerOrder || []);
-    pointRankEl.textContent = formatPointRank(pr, scoreHidden);
+    pointRankEl.innerHTML = renderPointRank(pr, scoreHidden);
   }
 
   // ---- ボタン演出状態 ----
@@ -649,9 +747,10 @@ function formatPointRank(pr, scoreHidden) {
 
   if (boardAnswerEnabled) {
     if (nameInputEl) {
-      bigBtnLabel.textContent = "SUBMIT";
+      bigBtnLabel.textContent = (boardPlayerMode.kind === "buzz" || boardPlayerMode.kind === "write_buzz") ? "PUSH" : "SUBMIT";
       bigBtn.disabled = true;
       lastRenderedBoardAnswerEnabled = true;
+      lastBoardActionKind = boardPlayerMode.kind;
       lastBoardSubmitted = myBoardSubmitted;
       return;
     }
@@ -664,15 +763,38 @@ function formatPointRank(pr, scoreHidden) {
     } else if (!(boardAnswerInputEl instanceof HTMLInputElement) || document.activeElement !== boardAnswerInputEl) {
       boardAnswerDraft = myBoardAnswer;
     }
-    ensureBoardAnswerIndicator(boardAnswerDraft, myBoardSubmitted);
-    bigBtnLabel.textContent = myBoardSubmitted ? "SENT" : "SUBMIT";
-    bigBtn.disabled = myBoardSubmitted || !sanitizeBoardAnswerText(boardAnswerDraft);
+    if (boardPlayerMode.kind === "submit") {
+      ensureBoardAnswerIndicator(boardAnswerDraft, myBoardSubmitted);
+      bigBtnLabel.textContent = myBoardSubmitted ? "SENT" : "SUBMIT";
+      bigBtn.disabled = myBoardSubmitted || !sanitizeBoardAnswerText(boardAnswerDraft);
+    } else if (boardPlayerMode.kind === "write_buzz") {
+      ensureBoardAnswerIndicator(boardAnswerDraft, false);
+      bigBtnLabel.textContent = "PUSH";
+      bigBtn.disabled = !canBuzz || !sanitizeBoardAnswerText(boardAnswerDraft);
+    } else if (boardPlayerMode.kind === "buzz") {
+      setIndicatorText(
+        buzzRankIndicator || (boardQuizMode === "board_to_buzz" ? "WAIT" : "PUSH")
+      );
+      boardAnswerInputEl = null;
+      bigBtnLabel.textContent = "PUSH";
+      bigBtn.disabled = boardQuizMode === "board_to_buzz"
+        ? (!myBoardSubmitted || !canBuzz)
+        : !canBuzz;
+    } else {
+      setIndicatorText(buzzRankIndicator || "WAIT");
+      boardAnswerInputEl = null;
+      bigBtnLabel.textContent = "WAIT";
+      bigBtn.disabled = true;
+    }
+    lastBoardActionKind = boardPlayerMode.kind;
     applyBtnState({
       isBlink: false,
       isLit: false,
       isWrong: myBoardResult === "wrong",
       isCorrect: myBoardResult === "correct",
-      isDisabledDim: false
+      isDisabledDim:
+        boardPlayerMode.kind === "wait" ||
+        (boardPlayerMode.kind === "buzz" && bigBtn.disabled)
     });
     lastRenderedBoardAnswerEnabled = true;
     lastBoardSubmitted = myBoardSubmitted;
@@ -684,6 +806,7 @@ function formatPointRank(pr, scoreHidden) {
     boardAnswerInputEl = null;
     lastRenderedBoardAnswerEnabled = false;
   }
+  lastBoardActionKind = "off";
   lastBoardSubmitted = false;
 
   if (isQualified) {

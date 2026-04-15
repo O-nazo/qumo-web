@@ -23,6 +23,10 @@ let serverHandle;
 let controllerWin = null;
 let visualizerWin = null;
 
+function getWindowIconPath() {
+  return path.join(__dirname, "..", "build", "icon.ico");
+}
+
 function loadWindowStates() {
   try {
     return JSON.parse(fs.readFileSync(windowStateFile(), "utf8"));
@@ -86,6 +90,15 @@ function bindWindowStatePersistence(win, role) {
   win.on("close", () => {
     if (saveTimer) clearTimeout(saveTimer);
     persistWindowState(role, win);
+  });
+}
+
+function applyWindowChrome(win, title) {
+  if (!win) return;
+  win.setTitle(title);
+  win.on("page-title-updated", (event) => {
+    event.preventDefault();
+    win.setTitle(title);
   });
 }
 
@@ -263,10 +276,13 @@ function createControllerWindow(url) {
   });
   const win = new BrowserWindow({
     ...bounds,
+    title: "Controller[クモノス]",
+    icon: getWindowIconPath(),
     webPreferences: { preload: path.join(__dirname, "preload.js") }
   });
   win._role = "controller";
   bindWindowStatePersistence(win, "controller");
+  applyWindowChrome(win, "Controller[クモノス]");
   win.loadURL(url);
   bindQuitOnClose(win);
   controllerWin = win;
@@ -285,12 +301,15 @@ function createVisualizerWindow(url) {
 
   const win = new BrowserWindow({
     ...bounds,
+    title: "Visualizer[クモノス]",
+    icon: getWindowIconPath(),
     frame: true,
     fullscreen: false,
     webPreferences: { preload: path.join(__dirname, "preload.js") }
   });
   win._role = "visualizer";
   bindWindowStatePersistence(win, "visualizer");
+  applyWindowChrome(win, "Visualizer[クモノス]");
   bindQuitOnClose(win);
   win.setMenuBarVisibility(false);
   win.loadURL(url);

@@ -6,6 +6,8 @@ function createNormalRuleDefinition({ clampInt }) {
       ruleProfile: "standard",
       correctPoints: 1,
       wrongPoints: -1,
+      earlyWinPlacePointRate: 1,
+      earlyWinFailPoints: -1,
       restPenalty: 1,
       qualifyEnabled: false,
       qualifyScore: 4,
@@ -21,6 +23,7 @@ function createNormalRuleDefinition({ clampInt }) {
     handlers: {
       initializePlayer(player) {
         player.manualScoreAdjust = 0;
+        player.scoreBonus = 0;
         player.score = 0;
       },
 
@@ -32,10 +35,12 @@ function createNormalRuleDefinition({ clampInt }) {
           const c = clampInt(p.correctCount, 0, 1000000, 0);
           const w = clampInt(p.wrongCount, 0, 1000000, 0);
           const manualAdjust = clampInt(p.manualScoreAdjust, -1000000, 1000000, 0);
+          const scoreBonus = clampInt(p.scoreBonus, -1000000, 1000000, 0);
           p.correctCount = c;
           p.wrongCount = w;
           p.manualScoreAdjust = manualAdjust;
-          p.score = c * cp + w * wp + manualAdjust;
+          p.scoreBonus = scoreBonus;
+          p.score = c * cp + w * wp + manualAdjust + scoreBonus;
         }
       },
 
@@ -143,7 +148,8 @@ function createNormalRuleDefinition({ clampInt }) {
         const wp = clampInt(rules?.wrongPoints, -1000, 1000000, -1);
         const correctCount = clampInt(player?.correctCount, 0, 1000000, 0);
         const wrongCount = clampInt(player?.wrongCount, 0, 1000000, 0);
-        player.manualScoreAdjust = Number(desiredScore) - (correctCount * cp + wrongCount * wp);
+        const scoreBonus = clampInt(player?.scoreBonus, -1000000, 1000000, 0);
+        player.manualScoreAdjust = Number(desiredScore) - (correctCount * cp + wrongCount * wp + scoreBonus);
       }
     }
   };

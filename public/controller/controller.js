@@ -24,6 +24,9 @@ const toggleBoardAnswerModeBtn = document.getElementById("toggleBoardAnswerMode"
 const toggleModScoreboardBtn = document.getElementById("toggleModScoreboard");
 const toggleScoreHiddenBtn = document.getElementById("toggleScoreHidden");
 const toggleTitleScreenBtn = document.getElementById("toggleTitleScreen");
+const addDebugPlayerBtn = document.getElementById("addDebugPlayer");
+const debugBuzzCountEl = document.getElementById("debugBuzzCount");
+const debugSimulateBuzzBtn = document.getElementById("debugSimulateBuzz");
 const playerCountEl = document.getElementById("playerCount");
 const playersGridEl = document.getElementById("playersGrid");
 const playersViewGridBtn = document.getElementById("playersViewGrid");
@@ -226,6 +229,26 @@ function canJudgeFromState(st) {
   return st?.judge?.status === "in_progress" && !!cur;
 }
 
+function getFocusedBoardJudgeTargetId(st) {
+  if (!st?.boardAnswer?.enabled) return null;
+  const focused = Array.isArray(st?.boardAnswer?.focusedPlayerIds) ? st.boardAnswer.focusedPlayerIds : [];
+  for (let i = focused.length - 1; i >= 0; i -= 1) {
+    const playerId = String(focused[i] || "").trim();
+    if (!playerId) continue;
+    if (!st?.players?.[playerId]) continue;
+    return playerId;
+  }
+  return null;
+}
+
+function judgeFocusedBoardAnswer(flag) {
+  const playerId = getFocusedBoardJudgeTargetId(lastState || {});
+  if (!playerId) return false;
+  client.emit("SET_BOARD_ANSWER_FLAG", { playerId, flag });
+  client.emit("APPLY_BOARD_ANSWER_JUDGMENTS");
+  return true;
+}
+
 
 // 早稲田式：進行は自動。判定とSE操作のみ。 
 
@@ -255,6 +278,8 @@ const els = {
 
   correctPoints: document.querySelector("#correctPoints"),
   wrongPoints: document.querySelector("#wrongPoints"),
+  earlyWinPlacePointRate: document.querySelector("#earlyWinPlacePointRate"),
+  earlyWinFailPoints: document.querySelector("#earlyWinFailPoints"),
   attackStartPoints: document.querySelector("#attackStartPoints"),
   attackCorrectDamage: document.querySelector("#attackCorrectDamage"),
   attackWrongDamage: document.querySelector("#attackWrongDamage"),
@@ -262,8 +287,8 @@ const els = {
   upDownQualifyScore: document.querySelector("#upDownQualifyScore"),
   upDownDqWrongCount: document.querySelector("#upDownDqWrongCount"),
   boardAnswerEnabled: document.querySelector("#boardAnswerEnabled"),
+  boardQuizMode: document.querySelector("#boardQuizMode"),
   boardJudge: document.querySelector("#boardJudge"),
-  boardAnswerClear: document.querySelector("#boardAnswerClear"),
   present: document.querySelector("#present"),
   buzzerReset: document.querySelector("#buzzerReset"),
   thinking: document.querySelector("#thinking"),
@@ -337,6 +362,20 @@ function setBoardAnswerFlag(playerId, flag) {
   client.emit("SET_BOARD_ANSWER_FLAG", { playerId, flag: nextFlag });
 }
 
+function toggleBoardAnswerOpen(playerId) {
+  const entry = getBoardEntry(lastState || {}, playerId);
+  const opened = entry?.opened === true;
+  client.emit(opened ? "CLOSE_BOARD_ANSWER" : "OPEN_BOARD_ANSWER", { playerId });
+}
+
+function resetBoardAnswer(playerId) {
+  client.emit("RESET_BOARD_ANSWER", { playerId });
+}
+
+function setBoardAnswerFocus(playerIds) {
+  client.emit("FOCUS_BOARD_ANSWERS", { playerIds });
+}
+
 function sanitizeBoardFlag(raw) {
   const value = String(raw || "").toLowerCase();
   return value === "correct" || value === "wrong" ? value : "";
@@ -370,12 +409,14 @@ function handlePresent() {
 }
 
 function handleCorrect() {
+  if (judgeFocusedBoardAnswer("correct")) return;
   // 受付中＆回答者がいるときだけ「判定」。それ以外はSEだけ鳴らす。
   if (canJudgeFromState(lastState)) client.emit("JUDGE_CORRECT");
   else client.emit("PLAY_SFX", { key: "correct" });
 }
 
 function handleWrong() {
+  if (judgeFocusedBoardAnswer("wrong")) return;
   // 受付中＆回答者がいるときだけ「判定」。それ以外はSEだけ鳴らす。
   if (canJudgeFromState(lastState)) client.emit("JUDGE_WRONG");
   else client.emit("PLAY_SFX", { key: "wrong" });
@@ -600,6 +641,8 @@ els.ruleProfile?.addEventListener("change", () => {
 
 els.correctPoints.addEventListener("change", emitRulePoints);
 els.wrongPoints.addEventListener("change", emitRulePoints);
+els.earlyWinPlacePointRate?.addEventListener("change", emitRulePoints);
+els.earlyWinFailPoints?.addEventListener("change", emitRulePoints);
 [
   els.displayQualifyPlayerCount,
   els.displayDisqualifiedPlayerCount,
@@ -681,7 +724,9 @@ els.qno?.addEventListener("keydown", (e) => {
 function emitRulePoints() {
   client.emit("SET_RULE_POINTS", {
     correctPoints: Number(els.correctPoints.value),
-    wrongPoints: Number(els.wrongPoints.value)
+    wrongPoints: Number(els.wrongPoints.value),
+    earlyWinPlacePointRate: Number(els.earlyWinPlacePointRate?.value),
+    earlyWinFailPoints: Number(els.earlyWinFailPoints?.value)
   });
 }
 
@@ -883,13 +928,46 @@ function getCurrentRespondent(st) {
   return st.buzzer?.buzzOrder?.[st.judge.currentIndex] ?? null;
 }
 
-function buildBuzzInfo(st) {
-  const buzzOrder = st.buzzer?.buzzOrder || [];
-  const orderMap = new Map(); // playerId -> { order, at }
-  buzzOrder.forEach((b, idx) => {
-    orderMap.set(b.playerId, { order: idx + 1, at: b.at });
+function getDisplayBuzzEntries(st) {
+  const rawMode = String(st?.rules?.buzzMode ?? "").toLowerCase();
+  const isEarlyMode = rawMode === "early_endless" || rawMode === "early_single" || rawMode === "survival_endless" || rawMode === "survival_single" || rawMode === "hayanuke_endless" || rawMode === "hayanuke_single";
+  const buzzOrder = Array.isArray(st?.buzzer?.buzzOrder) ? st.buzzer.buzzOrder : [];
+  if (!isEarlyMode) {
+    return buzzOrder.map((entry, idx) => ({
+      playerId: entry.playerId,
+      at: entry.at,
+      order: idx + 1
+    }));
+  }
+
+  const clearedOrder = Array.isArray(st?.judge?.clearedOrder) ? st.judge.clearedOrder : [];
+  const entries = [];
+  const seen = new Set();
+  clearedOrder.forEach((playerId, idx) => {
+    const key = String(playerId || "");
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    entries.push({ playerId: key, at: null, order: idx + 1 });
   });
-  const firstAt = st.buzzer?.firstBuzz?.at ?? null;
+  let nextOrder = entries.length + 1;
+  for (const entry of buzzOrder) {
+    const key = String(entry?.playerId || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ playerId: key, at: entry?.at ?? null, order: nextOrder });
+    nextOrder += 1;
+  }
+  return entries;
+}
+
+function buildBuzzInfo(st) {
+  const buzzOrder = getDisplayBuzzEntries(st);
+  const orderMap = new Map(); // playerId -> { order, at }
+  buzzOrder.forEach((b) => {
+    orderMap.set(b.playerId, { order: b.order, at: b.at });
+  });
+  const firstTimed = buzzOrder.find((entry) => Number.isFinite(Number(entry?.at)));
+  const firstAt = firstTimed ? Number(firstTimed.at) : null;
   return { orderMap, firstAt };
 }
 
@@ -933,6 +1011,20 @@ function requestPlayerRename(playerId, currentName) {
   }
 
   client.emit("CHANGE_NAME", { playerId, name });
+}
+
+function addDebugPlayer() {
+  client.emit("ADD_DEBUG_PLAYER", {});
+}
+
+function simulateDebugBuzz() {
+  const count = Math.max(1, Math.min(999, Number(debugBuzzCountEl?.value ?? 1) || 1));
+  if (debugBuzzCountEl) debugBuzzCountEl.value = String(count);
+  client.emit("DEBUG_SIMULATE_BUZZ", { count });
+}
+
+function removeDebugPlayer(playerId) {
+  client.emit("REMOVE_PLAYER", { playerId });
 }
 
 function renderRankBadge(rank) {
@@ -1075,10 +1167,14 @@ function renderPlayersGrid(st) {
     let gapText = "-";
     if (info && firstAt != null && order >= 2) gapText = formatGapSeconds(info.at - firstAt);
     const buzzOrderText = formatBuzzOrder(order, gapText);
+    const buzzOrderOnlyText = order ? ordinalShortEn(order) : "-";
+    const buzzGapOnlyText = info && order >= 2 ? gapText : "-";
     const boardEntry = getBoardEntry(st, p.id);
     const boardText = String(boardEntry?.text || "");
     const boardFlag = sanitizeBoardFlag(boardEntry?.flag);
     const boardResult = sanitizeBoardFlag(boardEntry?.result);
+    const boardOpened = boardEntry?.opened === true;
+    const isFocused = Array.isArray(st.boardAnswer?.focusedPlayerIds) && st.boardAnswer.focusedPlayerIds.includes(p.id);
 
     const isCurrent = currentPlayerId === p.id;
     const isWronged = !!st.judge?.wrongSet?.[p.id];
@@ -1101,6 +1197,12 @@ function renderPlayersGrid(st) {
     const reachHtml =
       (reachWin ? `<span class="reachTag reach-win">REACH</span>` : "") +
       (reachLose ? `<span class="reachTag reach-lose">REACH</span>` : "");
+    const debugBadgeHtml = p.isDebugVirtual
+      ? `<span class="playerTag playerTagDebug">DEBUG</span>`
+      : "";
+    const removeDebugBtnHtml = p.isDebugVirtual
+      ? `<button class="debugPlayerRemoveBtn" type="button" title="仮想プレイヤーを削除">×</button>`
+      : "";
 
     const tile = document.createElement("div");
     tile.className =
@@ -1119,27 +1221,62 @@ function renderPlayersGrid(st) {
     const correctCount = Number(p.correctCount ?? 0);
     const wrongCount = Number(p.wrongCount ?? 0);
     const score = Number(p.score ?? 0);
+    const boardAnswerPreviewClass =
+      boardFlag === "correct" ? " is-flag-correct" :
+      boardFlag === "wrong" ? " is-flag-wrong" :
+      "";
     const boardAnswerHtml = boardMode
-      ? `<div class="boardAnswerInline${boardText ? "" : " is-empty"}">${boardText ? escapeHtml(boardText) : ""}</div>`
+      ? `<div class="boardAnswerInline${boardText ? "" : " is-empty"}${boardAnswerPreviewClass}">${boardText ? escapeHtml(boardText) : ""}</div>`
       : "";
     const boardJudgeHtml = boardMode
       ? `<div class="boardAnswerJudge">
           <span class="boardJudgeBtn${boardFlag === "correct" ? " is-active" : ""}" data-flag="correct" title="○">○</span>
           <span class="boardJudgeBtn${boardFlag === "wrong" ? " is-active" : ""}" data-flag="wrong" title="✕">✕</span>
+          <button class="boardJudgeBtn boardActionBtn" data-action="open" type="button">${boardOpened ? "閉" : "開"}</button>
+          <button class="boardJudgeBtn boardActionBtn" data-action="focus" type="button">${isFocused ? "縮小" : "拡大"}</button>
+          <button class="boardJudgeBtn boardActionBtn" data-action="reset" type="button">リセット</button>
           ${getBoardResultBadge(boardResult)}
         </div>`
       : "";
+    const boardTableHtml = boardMode
+      ? `<div class="boardTableCell">
+          ${boardAnswerHtml}
+          ${boardJudgeHtml}
+        </div>`
+      : `<div class="tableSpacer">${reachHtml}</div>`;
+    const boardGridPanelHtml = boardMode
+      ? `<div class="boardGridPanel">
+          ${boardAnswerHtml}
+          ${boardJudgeHtml}
+        </div>`
+      : `<div class="boardGridPanel is-placeholder" aria-hidden="true">
+          <div class="boardAnswerInline boardAnswerPlaceholder is-empty">&nbsp;</div>
+          <div class="boardAnswerJudge boardAnswerJudgePlaceholder"></div>
+        </div>`;
+    const buzzMetaHtml = `
+      <div class="buzzMetaLine">
+        <span class="buzzMetaItem">
+          <span class="buzzMetaValue">${buzzOrderOnlyText}</span>
+        </span>
+        <span class="buzzMetaItem">
+          <span class="buzzMetaValue">${buzzGapOnlyText}</span>
+        </span>
+      </div>
+    `;
 
     if (playersViewMode === "table") {
       tile.innerHTML = `
         <div class="nameCell">
           <div class="tileRank">${rankText}</div>
-          <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+          <div class="nameWithMeta">
+            <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+            ${debugBadgeHtml}
+          </div>
         </div>
-        ${boardMode ? boardAnswerHtml : `<div class="tableSpacer">${reachHtml}</div>`}
+        ${boardTableHtml}
         <div class="right">
           <div class="v2 buzzOrderLine">${buzzOrderText}</div>
-          ${boardMode ? boardJudgeHtml : ""}
+          ${removeDebugBtnHtml}
         </div>
         <div class="score countEdit">
           <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
@@ -1168,33 +1305,25 @@ function renderPlayersGrid(st) {
     } else {
       if (boardMode) {
         tile.innerHTML = `
-          <div class="row1 boardTopRow">
+          <div class="row1 boardGridHeader">
             <div class="nameCell">
               <div class="tileRank">${rankText}</div>
-              <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+              <div class="nameWithMeta">
+                <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+                ${debugBadgeHtml}
+              </div>
             </div>
             <div class="right">
-              <div class="v2 buzzOrderLine">${buzzOrderText}</div>
-            </div>
-          </div>
-
-          ${boardAnswerHtml}
-          <div class="meta">
-            <div class="kv2">
-              <div>${reachHtml}</div>
+              ${removeDebugBtnHtml}
               <div class="score countEdit">
                 <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
               </div>
             </div>
           </div>
-          <div class="meta">
-            <div class="kv2">
-              <div></div>
-              ${boardJudgeHtml}
-            </div>
-          </div>
 
-          <div class="row2">
+          ${boardGridPanelHtml}
+
+          <div class="row2 boardGridFooter">
             <div class="countsInline">
               <div class="countPair">
                 <div class="label label-correct">○</div>
@@ -1215,6 +1344,7 @@ function renderPlayersGrid(st) {
                 </div>
               </div>
             </div>
+            ${buzzMetaHtml}
           </div>
         `;
       } else {
@@ -1222,10 +1352,14 @@ function renderPlayersGrid(st) {
           <div class="tileRank">${rankText}</div>
           <div class="row1">
             <div class="nameCell">
-              <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+              <div class="nameWithMeta">
+                <div class="${getControllerNameClass(p.name)}" title="名前を変更" aria-label="名前を変更" tabindex="0">${escapeHtml(p.name)}</div>
+                ${debugBadgeHtml}
+              </div>
             </div>
             <div class="right">
               ${reachHtml}
+              ${removeDebugBtnHtml}
               <div class="score countEdit">
                 <input class="countInput countInputScore" data-kind="score" type="number" min="-1000000" max="1000000" step="1" value="${score}" />
               </div>
@@ -1268,6 +1402,10 @@ function renderPlayersGrid(st) {
     const renameNameText = tile.querySelector(".renameNameText");
     const correctFlagBtn = tile.querySelector('.boardJudgeBtn[data-flag="correct"]');
     const wrongFlagBtn = tile.querySelector('.boardJudgeBtn[data-flag="wrong"]');
+    const openBtn = tile.querySelector('.boardJudgeBtn[data-action="open"]');
+    const focusBtn = tile.querySelector('.boardJudgeBtn[data-action="focus"]');
+    const resetBtn = tile.querySelector('.boardJudgeBtn[data-action="reset"]');
+    const removeDebugBtn = tile.querySelector(".debugPlayerRemoveBtn");
 
     function commitCounts(options = {}) {
       const c = getInput("correct")?.value ?? 0;
@@ -1346,6 +1484,36 @@ function renderPlayersGrid(st) {
       e.preventDefault();
       e.stopPropagation();
       setBoardAnswerFlag(p.id, "wrong");
+    });
+
+    openBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleBoardAnswerOpen(p.id);
+    });
+
+    focusBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const currentFocused = Array.isArray(lastState?.boardAnswer?.focusedPlayerIds)
+        ? lastState.boardAnswer.focusedPlayerIds
+        : [];
+      const nextFocused = isFocused
+        ? currentFocused.filter((id) => id !== p.id)
+        : [...currentFocused, p.id];
+      setBoardAnswerFocus(nextFocused);
+    });
+
+    resetBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resetBoardAnswer(p.id);
+    });
+
+    removeDebugBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      removeDebugPlayer(p.id);
     });
 
     if (playersViewMode === "table") {
@@ -1429,16 +1597,25 @@ playerTileLayoutSlimBtn?.addEventListener("click", () => {
   emitUiPrefs();
 });
 
+addDebugPlayerBtn?.addEventListener("click", addDebugPlayer);
+debugSimulateBuzzBtn?.addEventListener("click", simulateDebugBuzz);
+
 controllerSortModeEl?.addEventListener("change", emitUiPrefs);
 visualizerSortModeEl?.addEventListener("change", emitUiPrefs);
 els.boardAnswerEnabled?.addEventListener("click", () => {
-  client.emit("SET_BOARD_ANSWER_MODE", { enabled: !(lastState?.boardAnswer?.enabled === true) });
+  client.emit("SET_BOARD_ANSWER_MODE", {
+    enabled: !(lastState?.boardAnswer?.enabled === true),
+    boardQuizMode: String(els.boardQuizMode?.value || "standard")
+  });
 });
 toggleBoardAnswerModeBtn?.addEventListener("click", () => {
-  client.emit("SET_BOARD_ANSWER_MODE", { enabled: !(lastState?.boardAnswer?.enabled === true) });
+  client.emit("SET_BOARD_ANSWER_MODE", {
+    enabled: !(lastState?.boardAnswer?.enabled === true),
+    boardQuizMode: String(els.boardQuizMode?.value || "standard")
+  });
 });
-els.boardAnswerClear?.addEventListener("click", () => {
-  client.emit("CLEAR_BOARD_ANSWERS");
+els.boardQuizMode?.addEventListener("change", () => {
+  client.emit("SET_BOARD_QUIZ_MODE", { boardQuizMode: String(els.boardQuizMode?.value || "standard") });
 });
 
 applyPlayersViewMode();
@@ -1457,16 +1634,21 @@ client.onState((st) => {
   renderRulePresets(st);
   if (playerCountEl) {
     const connectedCount = Object.values(st.players || {}).filter((p) => p?.connected !== false).length;
-    playerCountEl.textContent = `${connectedCount}人接続中`;
+    const debugCount = Object.values(st.players || {}).filter((p) => p?.connected !== false && p?.isDebugVirtual).length;
+    playerCountEl.textContent = debugCount > 0
+      ? `${connectedCount}人接続中 / 仮想${debugCount}人`
+      : `${connectedCount}人接続中`;
   }
   renderPlayersGrid(st);
 
   if (els.buzzMode) {
-  const m = String(st.rules?.buzzMode ?? "endless").toLowerCase();
-  els.buzzMode.value =
-    (m === "cultq" || m === "cult" || m === "cartq") ? "cultq" :
-    (m === "single") ? "single" :
-    "endless";
+    const m = String(st.rules?.buzzMode ?? "endless").toLowerCase();
+    els.buzzMode.value =
+      (m === "early_endless" || m === "survival_endless" || m === "hayanuke_endless") ? "early_endless" :
+      (m === "early_single" || m === "survival_single" || m === "hayanuke_single") ? "early_single" :
+      (m === "cultq" || m === "cult" || m === "cartq") ? "cultq" :
+      (m === "single") ? "single" :
+      "endless";
   }
   if (els.ruleProfile) {
     const profile = String(st.rules?.ruleProfile || "standard");
@@ -1492,6 +1674,8 @@ client.onState((st) => {
   els.thinkingSeconds.value = String(st.rules?.thinkingSeconds ?? 5);
   els.correctPoints.value = String(st.rules?.correctPoints ?? 1);
   els.wrongPoints.value = String(st.rules?.wrongPoints ?? -1);
+  if (els.earlyWinPlacePointRate) els.earlyWinPlacePointRate.value = String(st.rules?.earlyWinPlacePointRate ?? 1);
+  if (els.earlyWinFailPoints) els.earlyWinFailPoints.value = String(st.rules?.earlyWinFailPoints ?? -1);
   if (els.attackStartPoints) {
     els.attackStartPoints.value = String(st.rules?.attackStartPoints ?? 20);
   }
@@ -1514,12 +1698,13 @@ client.onState((st) => {
     els.boardAnswerEnabled.dataset.on = st.boardAnswer?.enabled ? "1" : "0";
     els.boardAnswerEnabled.title = st.boardAnswer?.enabled ? "ボード解答を無効" : "ボード解答を有効";
   }
+  if (els.boardQuizMode) {
+    els.boardQuizMode.value = String(st.boardAnswer?.mode || st.ui?.boardQuizMode || "standard");
+    els.boardQuizMode.disabled = !(st.boardAnswer?.enabled);
+  }
   if (toggleBoardAnswerModeBtn) {
     toggleBoardAnswerModeBtn.dataset.on = st.boardAnswer?.enabled ? "1" : "0";
     toggleBoardAnswerModeBtn.title = st.boardAnswer?.enabled ? "ボード解答を無効" : "ボード解答を有効";
-  }
-  if (els.boardAnswerClear) {
-    els.boardAnswerClear.disabled = !st.boardAnswer?.enabled || Object.keys(st.boardAnswer?.responses || {}).length === 0;
   }
   if (els.boardJudge) {
     const flagged = Object.values(st.boardAnswer?.responses || {}).filter((entry) => sanitizeBoardFlag(entry?.flag)).length;

@@ -246,6 +246,7 @@ function resetPlayerProgressForRule(st, player) {
   player.correctCount = 0;
   player.wrongCount = 0;
   player.score = 0;
+  player.scoreBonus = 0;
   player.manualScoreAdjust = 0;
   player.forceDisqualify = false;
   player.restCount = 0;
@@ -282,6 +283,128 @@ function buildJudgeOutcomes(st, resultType, playerId) {
     return handlers.buildWrongPendingOutcomes?.(st, playerId) || [{ playerId, wrong: 1 }];
   }
   return [];
+}
+
+function buildBoardJudgeOutcomes(st, resultType, playerId) {
+  const outcomes = buildJudgeOutcomes(st, resultType, playerId)
+    .map((entry) => ({ ...entry }));
+  const rawMode = String(st?.boardAnswer?.mode || "").trim().toLowerCase();
+  const mode = rawMode === "buzz_plus_board" ? rawMode : "standard";
+
+  if (mode !== "buzz_plus_board") return outcomes;
+  if (String(st?.boardAnswer?.buzzStarterPlayerId || "") !== String(playerId || "")) return outcomes;
+
+  for (const outcome of outcomes) {
+    if (resultType === "correct") {
+      outcome.scoreDelta = Number(outcome.scoreDelta ?? 0) + 2;
+    } else if (resultType === "wrong") {
+      outcome.scoreDelta = Number(outcome.scoreDelta ?? 0) - 2;
+    }
+  }
+
+  return outcomes;
+}
+
+function isEarlyWinBuzzMode(st) {
+  const mode = getBuzzMode(st);
+  return mode === "early_endless" || mode === "early_single";
+}
+
+function getEarlyWinClearedOrder(st) {
+  return Array.isArray(st?.judge?.clearedOrder) ? st.judge.clearedOrder.map((id) => String(id || "")).filter(Boolean) : [];
+}
+
+function getEarlyWinClearRank(st, playerId) {
+  const pid = String(playerId || "").trim();
+  if (!pid) return 0;
+  const order = getEarlyWinClearedOrder(st);
+  const idx = order.indexOf(pid);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
+function appendEarlyWinClear(st, playerId) {
+  const pid = String(playerId || "").trim();
+  if (!pid) return 0;
+  if (!Array.isArray(st.judge.clearedOrder)) st.judge.clearedOrder = [];
+  if (!st.judge.clearedOrder.includes(pid)) {
+    st.judge.clearedOrder.push(pid);
+  }
+  return getEarlyWinClearRank(st, pid);
+}
+
+function removeBuzzEntryByPlayerId(st, playerId) {
+  const pid = String(playerId || "").trim();
+  if (!pid || !Array.isArray(st?.buzzer?.buzzOrder)) return;
+  st.buzzer.buzzOrder = st.buzzer.buzzOrder.filter((entry) => String(entry?.playerId || "") !== pid);
+  recomputeFirstBuzz(st);
+}
+
+function clampEarlyWinPlacePointRate(value) {
+  return clampInt(value, 0, 1000000, 1);
+}
+
+function clampEarlyWinFailPoints(value) {
+  return clampInt(value, -1000000, 1000000, -1);
+}
+
+function usesDerivedScoreBonus(st) {
+  const profile = String(st?.rules?.ruleProfile || "standard");
+  return profile === "standard" || profile === "ten_by_ten";
+}
+
+function buildEarlyWinCorrectOutcomes(st, playerId, clearRank) {
+  const outcomes = buildJudgeOutcomes(st, "correct", playerId)
+    .map((entry) => ({ ...entry }));
+  const bonusDelta = Math.max(0, Number(clearRank || 0)) * clampEarlyWinPlacePointRate(st?.rules?.earlyWinPlacePointRate);
+  if (bonusDelta <= 0) return outcomes;
+  for (const outcome of outcomes) {
+    if (String(outcome?.playerId || "") !== String(playerId || "")) continue;
+    if (usesDerivedScoreBonus(st)) {
+      outcome.bonusDelta = Number(outcome.bonusDelta ?? 0) + bonusDelta;
+    } else {
+      outcome.scoreDelta = Number(outcome.scoreDelta ?? 0) + bonusDelta;
+    }
+  }
+  return outcomes;
+}
+
+function buildEarlyWinFailOutcomes(st) {
+  const failPoints = clampEarlyWinFailPoints(st?.rules?.earlyWinFailPoints);
+  if (failPoints === 0) return [];
+  const clearedSet = new Set(getEarlyWinClearedOrder(st));
+  return Object.values(st.players || {})
+    .filter((player) => {
+      const playerId = String(player?.id || "");
+      if (!playerId) return false;
+      if (clearedSet.has(playerId)) return false;
+      if (player.connected === false) return false;
+      if (player.modDisabled) return false;
+      const status = String(player.status || "active");
+      return status !== "qualified" && status !== "disqualified";
+    })
+    .map((player) => ({
+      playerId: player.id,
+      ...(usesDerivedScoreBonus(st) ? { bonusDelta: failPoints } : { scoreDelta: failPoints })
+    }));
+}
+
+function transitionEarlyWinAfterJudgment(st, { playBuzzer = true } = {}) {
+  const nextIdx = pickNextRespondentIndex(st);
+  if (nextIdx >= 0) {
+    st.judge.status = "in_progress";
+    st.judge.currentIndex = nextIdx;
+    st.phase = "locked";
+    st.buzzer.isOpen = true;
+    if (playBuzzer) {
+      emitSfx(st, "buzzer");
+    }
+    return;
+  }
+
+  st.judge.status = "idle";
+  st.judge.currentIndex = 0;
+  st.phase = "open";
+  st.buzzer.isOpen = true;
 }
 
 const {
@@ -530,6 +653,7 @@ function createWsServer(httpServer) {
   let wrongAdvanceTimer = null;
   let autoResetTimer = null;
   let buzzCollectTimer = null;
+  const debugBuzzTimers = new Set();
 
   function clearWrongAdvanceTimer() {
     if (!wrongAdvanceTimer) return;
@@ -549,12 +673,20 @@ function createWsServer(httpServer) {
     buzzCollectTimer = null;
   }
 
+  function clearPendingDebugBuzzes() {
+    for (const timer of debugBuzzTimers) {
+      clearTimeout(timer);
+    }
+    debugBuzzTimers.clear();
+  }
+
   function clearPendingAutoReset() {
     clearAutoResetTimer();
   }
 
   function clearPendingBuzzCollection(st = null) {
     clearBuzzCollectTimer();
+    clearPendingDebugBuzzes();
     if (st?.buzzer) {
       st.buzzer.collectUntil = null;
     }
@@ -582,6 +714,15 @@ function createWsServer(httpServer) {
       st.judge.status = "in_progress";
       st.judge.currentIndex = nextIdx;
       st.judge.lastResult = null;
+      ensureBoardAnswerState(st);
+      if (st.boardAnswer.enabled) {
+        if (st.boardAnswer.mode === "buzz_to_board") {
+          st.boardAnswer.phase = "accepting";
+        } else if (st.boardAnswer.mode === "buzz_plus_board") {
+          st.boardAnswer.phase = "accepting";
+          st.boardAnswer.buzzStarterPlayerId = st.buzzer?.buzzOrder?.[nextIdx]?.playerId || null;
+        }
+      }
       emitSfx(st, "buzzer");
     }
     broadcastState();
@@ -627,6 +768,7 @@ function createWsServer(httpServer) {
       if (st2.judge?.status !== "result" || st2.phase !== "result") return;
 
       startQuestion(st2, { increment: true });
+      syncBoardAnswerFlow(st2);
       broadcastState();
     }, delayMs);
   }
@@ -637,6 +779,7 @@ function createWsServer(httpServer) {
     if (!st.players) st.players = {};
     if (!st.buzzer) st.buzzer = {};
     if (!st.judge) st.judge = {};
+    if (!Array.isArray(st.judge.clearedOrder)) st.judge.clearedOrder = [];
     if (!st.sfx) st.sfx = {};
     if (st.rules.autoResetEnabled == null) st.rules.autoResetEnabled = false;
     if (st.rules.autoResetDelayMs == null) st.rules.autoResetDelayMs = 1500;
@@ -668,6 +811,7 @@ function createWsServer(httpServer) {
 
     if (st.ui.joinQrVisible == null) st.ui.joinQrVisible = false;
     if (st.ui.lanModeEnabled == null) st.ui.lanModeEnabled = false;
+    if (st.ui.boardQuizMode == null) st.ui.boardQuizMode = "standard";
     if (st.ui.joinQrTargetUrl == null) st.ui.joinQrTargetUrl = null;
     if (st.ui.joinQrDataUrl == null) st.ui.joinQrDataUrl = null;
     if (st.titleScreenVisible == null) st.titleScreenVisible = false;
@@ -681,10 +825,14 @@ function createWsServer(httpServer) {
     if (st.questionNo == null) st.questionNo = 1;
     updatePresetList(st);
     normalizePlayerOrder(st);
+    ensureBoardAnswerState(st);
+    st.boardAnswer.mode = sanitizeBoardQuizMode(st.ui.boardQuizMode ?? st.boardAnswer.mode);
+    st.ui.boardQuizMode = st.boardAnswer.mode;
 
     // 初期状態：即受付
     if (!st.phase || st.phase === "lobby") {
       startQuestion(st, { increment: false });
+      syncBoardAnswerFlow(st);
     }
   }
 
@@ -862,12 +1010,32 @@ function createWsServer(httpServer) {
     st.boardAnswer = st.boardAnswer || {};
     st.boardAnswer.enabled = !!st.boardAnswer.enabled;
     st.boardAnswer.visibleOnVisualizer = !!st.boardAnswer.visibleOnVisualizer;
+    st.boardAnswer.mode = sanitizeBoardQuizMode(st.boardAnswer.mode);
+    st.boardAnswer.phase = sanitizeBoardPhase(st.boardAnswer.phase);
     st.boardAnswer.responses = st.boardAnswer.responses && typeof st.boardAnswer.responses === "object"
       ? st.boardAnswer.responses
       : {};
     st.boardAnswer.lastJudged = st.boardAnswer.lastJudged && typeof st.boardAnswer.lastJudged === "object"
       ? st.boardAnswer.lastJudged
       : null;
+    st.boardAnswer.focusedPlayerIds = Array.isArray(st.boardAnswer.focusedPlayerIds)
+      ? st.boardAnswer.focusedPlayerIds.map((id) => String(id || "")).filter(Boolean)
+      : [];
+    st.boardAnswer.buzzStarterPlayerId = String(st.boardAnswer.buzzStarterPlayerId || "").trim() || null;
+  }
+
+  function sanitizeBoardQuizMode(raw) {
+    const value = String(raw || "").trim().toLowerCase();
+    if (value === "buzz_to_board" || value === "board_to_buzz" || value === "buzz_plus_board") {
+      return value;
+    }
+    return "standard";
+  }
+
+  function sanitizeBoardPhase(raw) {
+    const value = String(raw || "").trim().toLowerCase();
+    if (value === "accepting" || value === "buzz" || value === "review") return value;
+    return "idle";
   }
 
   function sanitizeBoardAnswer(raw) {
@@ -900,6 +1068,7 @@ function createWsServer(httpServer) {
       existing.result = sanitizeBoardAnswerFlag(existing.result);
       existing.submittedAt = Number(existing.submittedAt || 0) || null;
       existing.updatedAt = Number(existing.updatedAt || 0) || null;
+      existing.opened = existing.opened === true;
       return existing;
     }
 
@@ -910,10 +1079,115 @@ function createWsServer(httpServer) {
       flag: "",
       result: "",
       submittedAt: null,
-      updatedAt: null
+      updatedAt: null,
+      opened: false
     };
     st.boardAnswer.responses[playerId] = entry;
     return entry;
+  }
+
+  function getBoardEligiblePlayerIds(st) {
+    return Object.values(st.players || {})
+      .filter((player) => {
+        if (!player?.id) return false;
+        if (player.connected === false) return false;
+        if (Number(player.restCount ?? 0) > 0) return false;
+        if (player.modDisabled) return false;
+        const status = String(player.status || "active");
+        return status !== "qualified" && status !== "disqualified";
+      })
+      .map((player) => String(player.id));
+  }
+
+  function resetBoardAnswerRound(st) {
+    ensureBoardAnswerState(st);
+    st.boardAnswer.responses = {};
+    st.boardAnswer.lastJudged = null;
+    st.boardAnswer.focusedPlayerIds = [];
+    st.boardAnswer.buzzStarterPlayerId = null;
+    st.boardAnswer.phase = st.boardAnswer.enabled
+      ? (st.boardAnswer.mode === "standard" || st.boardAnswer.mode === "board_to_buzz" ? "accepting" : "idle")
+      : "idle";
+  }
+
+  function syncBoardAnswerFlow(st) {
+    ensureBoardAnswerState(st);
+    if (!st.boardAnswer.enabled) {
+      st.boardAnswer.phase = "idle";
+      st.boardAnswer.focusedPlayerIds = [];
+      st.boardAnswer.buzzStarterPlayerId = null;
+      return;
+    }
+
+    const mode = sanitizeBoardQuizMode(st.boardAnswer.mode);
+    if (mode === "standard") {
+      st.boardAnswer.phase = "accepting";
+      st.buzzer.isOpen = false;
+      return;
+    }
+
+    if (mode === "board_to_buzz") {
+      st.boardAnswer.phase =
+        (st.phase === "result" || st.judge?.status === "result")
+          ? "review"
+          : "accepting";
+      st.buzzer.isOpen = st.phase !== "result" && st.judge?.status !== "result";
+      return;
+    }
+
+    if (mode === "buzz_to_board" || mode === "buzz_plus_board") {
+      const hasRespondent = !!getCurrentRespondent(st);
+      st.boardAnswer.phase = hasRespondent ? "accepting" : "idle";
+      st.buzzer.isOpen = !hasRespondent && st.phase !== "result" && st.judge?.status !== "result";
+      return;
+    }
+  }
+
+  function canPlayerSubmitBoardAnswer(st, playerId) {
+    ensureBoardAnswerState(st);
+    if (!st.boardAnswer.enabled) return false;
+    const mode = sanitizeBoardQuizMode(st.boardAnswer.mode);
+    const phase = sanitizeBoardPhase(st.boardAnswer.phase);
+
+    if (mode === "standard") return phase === "accepting";
+    if (mode === "board_to_buzz") return phase === "accepting";
+    if (mode === "buzz_to_board") {
+      const cur = getCurrentRespondent(st);
+      return phase === "accepting" && cur?.playerId === playerId;
+    }
+    if (mode === "buzz_plus_board") {
+      return phase === "accepting";
+    }
+    return false;
+  }
+
+  function setBoardAnswerOpened(st, playerId, opened) {
+    const entry = ensureBoardAnswerEntry(st, playerId);
+    if (!entry) return false;
+    entry.opened = opened === true;
+    entry.updatedAt = Date.now();
+    return true;
+  }
+
+  function markBoardAnswerResult(st, playerId, result, { opened = null } = {}) {
+    const entry = ensureBoardAnswerEntry(st, playerId);
+    if (!entry) return false;
+    entry.result = sanitizeBoardAnswerFlag(result);
+    entry.flag = "";
+    if (opened === true || opened === false) {
+      entry.opened = opened;
+    }
+    entry.updatedAt = Date.now();
+    return true;
+  }
+
+  function setBoardAnswerFocus(st, playerIds) {
+    ensureBoardAnswerState(st);
+    st.boardAnswer.focusedPlayerIds = Array.from(new Set(
+      (Array.isArray(playerIds) ? playerIds : [])
+        .map((id) => String(id || "").trim())
+        .filter((id) => !!st.players?.[id])
+    ));
   }
 
   function findPlayerByExactName(st, name) {
@@ -924,6 +1198,151 @@ function createWsServer(httpServer) {
       if (String(p?.name || "") === target) return p;
     }
     return null;
+  }
+
+  function findUniqueDebugPlayerName(st, baseName = "DEBUG") {
+    const base = String(sanitizeName(baseName || "DEBUG")).slice(0, 20) || "DEBUG";
+    if (!findPlayerByExactName(st, base)) return base;
+
+    let index = 1;
+    while (index < 10000) {
+      const suffix = ` ${index}`;
+      const candidate = `${base}${suffix}`.slice(0, 20);
+      if (!findPlayerByExactName(st, candidate)) return candidate;
+      index += 1;
+    }
+    return `${base} ${Date.now()}`.slice(0, 20);
+  }
+
+  function removePlayerFromState(st, playerId) {
+    const id = String(playerId || "").trim();
+    if (!id || !st.players?.[id]) return false;
+
+    delete st.players[id];
+
+    if (Array.isArray(st.ui?.playerOrder)) {
+      st.ui.playerOrder = st.ui.playerOrder.filter((entryId) => String(entryId || "") !== id);
+    }
+    if (Array.isArray(st.ui?.rankSortOrder)) {
+      st.ui.rankSortOrder = st.ui.rankSortOrder.filter((entryId) => String(entryId || "") !== id);
+    }
+    if (Array.isArray(st.ui?.hiddenScoreRankSortOrder)) {
+      st.ui.hiddenScoreRankSortOrder = st.ui.hiddenScoreRankSortOrder.filter((entryId) => String(entryId || "") !== id);
+    }
+
+    if (Array.isArray(st.buzzer?.buzzOrder)) {
+      st.buzzer.buzzOrder = st.buzzer.buzzOrder.filter((entry) => String(entry?.playerId || "") !== id);
+      recomputeFirstBuzz(st);
+    }
+    if (st.buzzer?.firstBuzz?.playerId === id) {
+      st.buzzer.firstBuzz = null;
+    }
+
+    if (st.judge?.wrongSet && typeof st.judge.wrongSet === "object") {
+      delete st.judge.wrongSet[id];
+    }
+    if (st.judge?.pendingOutcome && typeof st.judge.pendingOutcome === "object") {
+      delete st.judge.pendingOutcome[id];
+    }
+    if (Array.isArray(st.judge?.clearedOrder)) {
+      st.judge.clearedOrder = st.judge.clearedOrder.filter((entryId) => String(entryId || "") !== id);
+    }
+    if (st.judge?.lastResult?.playerId === id) {
+      st.judge.lastResult = null;
+    }
+    if (st.judge?.status === "in_progress") {
+      const nextIdx = pickNextRespondentIndex(st);
+      if (nextIdx >= 0) {
+        st.judge.currentIndex = nextIdx;
+      } else {
+        resetJudge(st);
+        st.phase = st.buzzer?.isOpen ? "open" : "lobby";
+      }
+    }
+
+    if (st.boardAnswer?.responses && typeof st.boardAnswer.responses === "object") {
+      delete st.boardAnswer.responses[id];
+    }
+    if (Array.isArray(st.boardAnswer?.focusedPlayerIds)) {
+      st.boardAnswer.focusedPlayerIds = st.boardAnswer.focusedPlayerIds.filter((entryId) => String(entryId || "") !== id);
+    }
+    if (String(st.boardAnswer?.buzzStarterPlayerId || "") === id) {
+      st.boardAnswer.buzzStarterPlayerId = null;
+    }
+
+    normalizePlayerOrder(st);
+    return true;
+  }
+
+  function shuffleArray(items) {
+    const arr = Array.isArray(items) ? [...items] : [];
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function performPlayerBuzz(st, playerId, { recvAt = Date.now(), at = recvAt } = {}) {
+    const pid = String(playerId || "").trim();
+    if (!pid) return false;
+    ensureBoardAnswerState(st);
+
+    if (st.phase === "result" || st.judge?.status === "result") return false;
+    if (!st.buzzer.isOpen) return false;
+
+    const buzzMode = getBuzzMode(st);
+    if (buzzMode === "cultq" && st.judge?.status === "in_progress") return false;
+    if (!canBuzzNow(st, pid)) return false;
+    if (st.buzzer?.buzzOrder?.some((b) => b.playerId === pid)) return false;
+
+    st.buzzer.buzzOrder.push({ playerId: pid, at, recvAt });
+    st.buzzer.buzzOrder.sort((a, b) => (a.at - b.at) || (a.recvAt - b.recvAt));
+    recomputeFirstBuzz(st);
+
+    const active = String(getState()?.mods?.active || "");
+    if (active) {
+      const rt = getModRuntime();
+      const idx = st.buzzer.buzzOrder.findIndex((b) => b.playerId === pid);
+      const rank = idx >= 0 ? idx + 1 : null;
+
+      rt?.emit?.(active, "BUZZ", {
+        playerId: pid,
+        rank,
+        at,
+        recvAt,
+        phase: st.phase,
+        judgeStatus: st.judge?.status ?? null
+      });
+    }
+
+    const wrongSet = st.judge?.wrongSet || {};
+    const existsUnwrongedPlayer = Object.values(st.players || {}).some((p) => !wrongSet[p.id]);
+    const willStartResponding =
+      st.judge?.status !== "in_progress" &&
+      existsUnwrongedPlayer;
+
+    if (willStartResponding) {
+      if (!buzzCollectTimer) {
+        st.buzzer.collectSeq = Number(st.buzzer.collectSeq ?? 0) + 1;
+        st.buzzer.collectUntil = recvAt + BUZZ_COLLECTION_WINDOW_MS;
+        const collectSeq = st.buzzer.collectSeq;
+        buzzCollectTimer = setTimeout(() => {
+          finalizeBuzzCollection(collectSeq);
+        }, BUZZ_COLLECTION_WINDOW_MS);
+      }
+
+      broadcastState();
+      return true;
+    }
+
+    const idx = st.buzzer.buzzOrder.findIndex((b) => b.playerId === pid);
+    if (idx >= 1) {
+      emitSfx(st, "push");
+    }
+
+    broadcastState();
+    return true;
   }
 
   function normalizePlayerOrder(st, preferredIds = null) {
@@ -1056,6 +1475,7 @@ function createWsServer(httpServer) {
 
         const mode = getBuzzMode({ rules: { buzzMode: msg.buzzMode } });
         st.rules.buzzMode = mode;
+        st.judge.clearedOrder = [];
 
         // 途中変更でも破綻しないよう、必要なら現在の回答者を再計算
         if (st.phase !== "result") {
@@ -1091,9 +1511,7 @@ function createWsServer(httpServer) {
             resetBuzzer(st);
             resetJudge(st);
             st.phase = "lobby";
-            ensureBoardAnswerState(st);
-            st.boardAnswer.responses = {};
-            st.boardAnswer.lastJudged = null;
+            resetBoardAnswerRound(st);
           }
           recomputeScores(st);
           recomputePlayerStatuses(st);
@@ -1127,6 +1545,7 @@ function createWsServer(httpServer) {
         // 結果表示中なら次問へ、そうでなければ同じ問を受付再開
         updateRankSortOrderSnapshot(st);
         startQuestion(st, { increment: (st.judge?.status === "result" || st.phase === "result") });
+        syncBoardAnswerFlow(st);
         emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
@@ -1139,9 +1558,7 @@ function createWsServer(httpServer) {
         clearPendingBuzzCollection(st);
         st.titleScreenVisible = false;
         settleResetState(st);
-        ensureBoardAnswerState(st);
-        st.boardAnswer.responses = {};
-        st.boardAnswer.lastJudged = null;
+        resetBoardAnswerRound(st);
         emitMod("STATE_UPDATED", { at: Date.now() });
         broadcastState();
         return;
@@ -1163,6 +1580,7 @@ function createWsServer(httpServer) {
         emitMod("STATE_UPDATED", { at: Date.now() });
         updateRankSortOrderSnapshot(st);
         startQuestion(st, { increment: false });
+        syncBoardAnswerFlow(st);
         broadcastState();
         return;
       }
@@ -1257,6 +1675,65 @@ function createWsServer(httpServer) {
         return;
       }
 
+      if (type === (C2S.ADD_DEBUG_PLAYER || "ADD_DEBUG_PLAYER")) {
+        if (ws.meta.screen !== "controller") return;
+
+        const playerId = `dbg_${genId(6)}`;
+        st.players[playerId] = {
+          id: playerId,
+          name: findUniqueDebugPlayerName(st, msg.name || "DEBUG"),
+          connected: true,
+          isDebugVirtual: true
+        };
+        resetPlayerProgressForRule(st, st.players[playerId]);
+        normalizePlayerOrder(st);
+        updateRankSortOrderSnapshot(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.DEBUG_SIMULATE_BUZZ || "DEBUG_SIMULATE_BUZZ")) {
+        if (ws.meta.screen !== "controller") return;
+
+        const requestedCount = clampInt(msg.count, 1, 999, 1);
+        const candidatePlayers = Object.values(st.players || {}).filter((player) =>
+          player?.connected !== false &&
+          player?.isDebugVirtual === true &&
+          canBuzzNow(st, player.id) &&
+          !st.buzzer?.buzzOrder?.some((entry) => entry.playerId === player.id)
+        );
+
+        const selectedPlayers = shuffleArray(candidatePlayers).slice(0, requestedCount);
+        if (!selectedPlayers.length) return;
+
+        clearPendingDebugBuzzes();
+
+        let elapsedMs = 0;
+        selectedPlayers.forEach((player) => {
+          elapsedMs += (Math.floor(Math.random() * 1000) + 1);
+          const timer = setTimeout(() => {
+            debugBuzzTimers.delete(timer);
+            const currentState = getState();
+            performPlayerBuzz(currentState, player.id, { recvAt: Date.now() });
+          }, elapsedMs);
+          debugBuzzTimers.add(timer);
+        });
+        return;
+      }
+
+      if (type === (C2S.REMOVE_PLAYER || "REMOVE_PLAYER")) {
+        if (ws.meta.screen !== "controller") return;
+
+        const playerId = String(msg.playerId || "").trim();
+        const player = st.players?.[playerId];
+        if (!player?.isDebugVirtual) return;
+
+        removePlayerFromState(st, playerId);
+        updateRankSortOrderSnapshot(st);
+        broadcastState();
+        return;
+      }
+
       if (type === (C2S.SET_PLAYER_ORDER || "SET_PLAYER_ORDER")) {
         if (ws.meta.screen !== "controller") return;
 
@@ -1269,10 +1746,32 @@ function createWsServer(httpServer) {
       if (type === (C2S.SET_BOARD_ANSWER_MODE || "SET_BOARD_ANSWER_MODE")) {
         if (ws.meta.screen !== "controller") return;
         ensureBoardAnswerState(st);
+        const nextEnabled = !!msg.enabled;
+        const nextMode = sanitizeBoardQuizMode(msg.boardQuizMode ?? st.boardAnswer.mode);
+        const shouldReset = st.boardAnswer.enabled !== nextEnabled || st.boardAnswer.mode !== nextMode;
         st.boardAnswer.enabled = !!msg.enabled;
         st.boardAnswer.visibleOnVisualizer = st.boardAnswer.enabled;
+        st.boardAnswer.mode = nextMode;
+        if (shouldReset) resetBoardAnswerRound(st);
         st.ui.boardAnswerEnabled = st.boardAnswer.enabled;
         st.ui.boardAnswerVisible = st.boardAnswer.visibleOnVisualizer;
+        st.ui.boardQuizMode = st.boardAnswer.mode;
+        syncBoardAnswerFlow(st);
+        persistControllerPrefs(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.SET_BOARD_QUIZ_MODE || "SET_BOARD_QUIZ_MODE")) {
+        if (ws.meta.screen !== "controller") return;
+        ensureBoardAnswerState(st);
+        const nextMode = sanitizeBoardQuizMode(msg.boardQuizMode);
+        if (st.boardAnswer.mode !== nextMode) {
+          st.boardAnswer.mode = nextMode;
+          resetBoardAnswerRound(st);
+        }
+        st.ui.boardQuizMode = st.boardAnswer.mode;
+        syncBoardAnswerFlow(st);
         persistControllerPrefs(st);
         broadcastState();
         return;
@@ -1290,9 +1789,75 @@ function createWsServer(httpServer) {
 
       if (type === (C2S.CLEAR_BOARD_ANSWERS || "CLEAR_BOARD_ANSWERS")) {
         if (ws.meta.screen !== "controller") return;
-        ensureBoardAnswerState(st);
-        st.boardAnswer.responses = {};
-        st.boardAnswer.lastJudged = null;
+        resetBoardAnswerRound(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.OPEN_BOARD_ANSWER || "OPEN_BOARD_ANSWER")) {
+        if (ws.meta.screen !== "controller") return;
+        const playerId = String(msg.playerId || "").trim();
+        if (!playerId) return;
+        if (!setBoardAnswerOpened(st, playerId, true)) return;
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.CLOSE_BOARD_ANSWER || "CLOSE_BOARD_ANSWER")) {
+        if (ws.meta.screen !== "controller") return;
+        const playerId = String(msg.playerId || "").trim();
+        if (!playerId) return;
+        if (!setBoardAnswerOpened(st, playerId, false)) return;
+        setBoardAnswerFocus(st, st.boardAnswer.focusedPlayerIds.filter((id) => id !== playerId));
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.OPEN_BOARD_ANSWERS || "OPEN_BOARD_ANSWERS")) {
+        if (ws.meta.screen !== "controller") return;
+        const playerIds = Array.isArray(msg.playerIds) ? msg.playerIds : [];
+        let changed = false;
+        for (const rawPlayerId of playerIds) {
+          changed = setBoardAnswerOpened(st, String(rawPlayerId || "").trim(), true) || changed;
+        }
+        if (!changed) return;
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.CLOSE_BOARD_ANSWERS || "CLOSE_BOARD_ANSWERS")) {
+        if (ws.meta.screen !== "controller") return;
+        const playerIds = Array.isArray(msg.playerIds) ? msg.playerIds : [];
+        let changed = false;
+        for (const rawPlayerId of playerIds) {
+          changed = setBoardAnswerOpened(st, String(rawPlayerId || "").trim(), false) || changed;
+        }
+        setBoardAnswerFocus(st, []);
+        if (!changed) return;
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.RESET_BOARD_ANSWER || "RESET_BOARD_ANSWER")) {
+        if (ws.meta.screen !== "controller") return;
+        const playerId = String(msg.playerId || "").trim();
+        const entry = ensureBoardAnswerEntry(st, playerId);
+        if (!entry) return;
+        entry.text = "";
+        entry.flag = "";
+        entry.result = "";
+        entry.submittedAt = null;
+        entry.updatedAt = Date.now();
+        entry.opened = false;
+        setBoardAnswerFocus(st, st.boardAnswer.focusedPlayerIds.filter((id) => id !== playerId));
+        syncBoardAnswerFlow(st);
+        broadcastState();
+        return;
+      }
+
+      if (type === (C2S.FOCUS_BOARD_ANSWERS || "FOCUS_BOARD_ANSWERS")) {
+        if (ws.meta.screen !== "controller") return;
+        setBoardAnswerFocus(st, Array.isArray(msg.playerIds) ? msg.playerIds : []);
         broadcastState();
         return;
       }
@@ -1311,6 +1876,7 @@ function createWsServer(httpServer) {
       if (type === (C2S.APPLY_BOARD_ANSWER_JUDGMENTS || "APPLY_BOARD_ANSWER_JUDGMENTS")) {
         if (ws.meta.screen !== "controller") return;
         ensureBoardAnswerState(st);
+        const boardQuizMode = sanitizeBoardQuizMode(st.boardAnswer.mode);
 
         const results = {};
         let correctApplied = 0;
@@ -1324,12 +1890,14 @@ function createWsServer(httpServer) {
 
           if (!st.players[playerId]) continue;
 
-          if (flag === "correct") {
-            queueJudgeOutcomes(st, buildJudgeOutcomes(st, "correct", playerId));
-            correctApplied += 1;
-          } else if (flag === "wrong") {
-            queueJudgeOutcomes(st, buildJudgeOutcomes(st, "wrong", playerId));
-            wrongApplied += 1;
+          if (boardQuizMode !== "board_to_buzz") {
+            if (flag === "correct") {
+              queueJudgeOutcomes(st, buildBoardJudgeOutcomes(st, "correct", playerId));
+              correctApplied += 1;
+            } else if (flag === "wrong") {
+              queueJudgeOutcomes(st, buildBoardJudgeOutcomes(st, "wrong", playerId));
+              wrongApplied += 1;
+            }
           }
 
           entry.result = flag;
@@ -1340,19 +1908,28 @@ function createWsServer(httpServer) {
 
         if (!Object.keys(results).length) return;
 
-        applyPendingJudgeOutcome(st);
+        if (boardQuizMode !== "board_to_buzz") {
+          applyPendingJudgeOutcome(st);
+        }
         st.boardAnswer.lastJudged = {
           nonce: Number(st.boardAnswer.lastJudged?.nonce ?? 0) + 1,
           at: Date.now(),
           results
         };
 
-        if (correctApplied > 0 && wrongApplied === 0) {
+        const judgedValues = Object.values(results);
+        const hasCorrect = correctApplied > 0 || judgedValues.includes("correct");
+        const hasWrong = wrongApplied > 0 || judgedValues.includes("wrong");
+
+        if (hasCorrect) {
           emitSfx(st, "correct");
-        } else if (wrongApplied > 0 && correctApplied === 0) {
+        } else if (hasWrong) {
           emitSfx(st, "wrong");
         }
 
+        if (boardQuizMode !== "board_to_buzz") {
+          st.boardAnswer.phase = "review";
+        }
         broadcastState();
         return;
       }
@@ -1389,6 +1966,36 @@ function createWsServer(httpServer) {
 
         const cur = getCurrentRespondent(st);
         if (!cur) return;
+        const boardQuizMode = sanitizeBoardQuizMode(st.boardAnswer?.mode);
+        const buzzMode = getBuzzMode(st);
+
+        if (st.boardAnswer?.enabled) {
+          markBoardAnswerResult(st, cur.playerId, "correct");
+          if (boardQuizMode === "board_to_buzz") {
+            st.boardAnswer.phase = "review";
+          }
+        }
+
+        if (buzzMode === "early_endless" || buzzMode === "early_single") {
+          const clearRank = appendEarlyWinClear(st, cur.playerId);
+          queueJudgeOutcomes(st, buildEarlyWinCorrectOutcomes(st, cur.playerId, clearRank));
+          removeBuzzEntryByPlayerId(st, cur.playerId);
+          emitMod("JUDGE_CORRECT", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
+
+          if (!hasAnyEligiblePlayer(st)) {
+            emitSfx(st, "correct");
+            setResult(st, { type: "correct", playerId: cur.playerId });
+            scheduleAutoReset(st);
+            broadcastState();
+            scheduleNextQuestion();
+            return;
+          }
+
+          transitionEarlyWinAfterJudgment(st, { playBuzzer: false });
+          emitSfx(st, "correct");
+          broadcastState();
+          return;
+        }
 
         queueJudgeOutcomes(st, buildJudgeOutcomes(st, "correct", cur.playerId));
         emitSfx(st, "correct");
@@ -1405,16 +2012,43 @@ function createWsServer(httpServer) {
 
         const cur = getCurrentRespondent(st);
         if (!cur) return;
+        const boardQuizMode = sanitizeBoardQuizMode(st.boardAnswer?.mode);
+        const buzzMode = getBuzzMode(st);
+
+        if (st.boardAnswer?.enabled) {
+          markBoardAnswerResult(st, cur.playerId, "wrong");
+        }
 
         queueJudgeOutcomes(st, buildJudgeOutcomes(st, "wrong", cur.playerId));
-
-        st.judge.wrongSet[cur.playerId] = true;
-
-        const buzzMode = getBuzzMode(st);
+        if (buzzMode !== "early_endless") {
+          st.judge.wrongSet[cur.playerId] = true;
+        }
 
         emitMod("JUDGE_WRONG", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
 
+        if (buzzMode === "early_endless" || buzzMode === "early_single") {
+          removeBuzzEntryByPlayerId(st, cur.playerId);
+
+          if (buzzMode === "early_single" && !hasAnyEligiblePlayer(st)) {
+            queueJudgeOutcomes(st, buildEarlyWinFailOutcomes(st));
+            emitSfx(st, "wrong");
+            setResult(st, { type: "skip", playerId: cur.playerId });
+            scheduleAutoReset(st);
+            broadcastState();
+            scheduleNextQuestion();
+            return;
+          }
+
+          emitSfx(st, "wrong");
+          transitionEarlyWinAfterJudgment(st);
+          broadcastState();
+          return;
+        }
+
         if (st.rules?.autoResetEnabled) {
+          if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+            st.boardAnswer.phase = "review";
+          }
           emitSfx(st, "wrong");
           scheduleAutoReset(st);
           broadcastState();
@@ -1422,6 +2056,9 @@ function createWsServer(httpServer) {
         }
 
         if (buzzMode === "single") {
+          if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+            st.boardAnswer.phase = "review";
+          }
           emitSfx(st, "wrong");
           setResult(st, { type: "skip", playerId: cur.playerId });
           scheduleAutoReset(st);
@@ -1466,6 +2103,9 @@ function createWsServer(httpServer) {
 
           // まだ次の押下者がいない → 受付に戻して押下待ち（buzzOrderは保持）
           if (!hasAnyEligiblePlayer(st)) {
+            if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+              st.boardAnswer.phase = "review";
+            }
             emitSfx(st, "wrong");
             setResult(st, { type: "skip" });
             scheduleAutoReset(st);
@@ -1478,12 +2118,18 @@ function createWsServer(httpServer) {
           st.judge.status = "idle";
           st.phase = "open";
           st.buzzer.isOpen = true;
+          if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+            st.boardAnswer.phase = "buzz";
+          }
           broadcastState();
           return;
         }
         else if(buzzMode === "cultq")
         {
           if (!hasAnyEligiblePlayer(st)) {
+            if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+              st.boardAnswer.phase = "review";
+            }
             emitSfx(st, "wrong");
             setResult(st, { type: "all_wrong" });
             scheduleAutoReset(st);
@@ -1499,6 +2145,9 @@ function createWsServer(httpServer) {
           st.buzzer.isOpen = true;
           st.buzzer.buzzOrder = [];
           st.buzzer.firstBuzz = null;
+          if (st.boardAnswer?.enabled && boardQuizMode === "board_to_buzz") {
+            st.boardAnswer.phase = "buzz";
+          }
           broadcastState();
           return;
         }
@@ -1508,6 +2157,14 @@ function createWsServer(httpServer) {
       if (type === C2S.JUDGE_SKIP) {
         if (ws.meta.screen !== "controller") return;
         clearPendingBuzzCollection(st);
+
+        if (st.boardAnswer?.enabled && sanitizeBoardQuizMode(st.boardAnswer?.mode) === "board_to_buzz") {
+          st.boardAnswer.phase = "review";
+        }
+
+        if (isEarlyWinBuzzMode(st)) {
+          queueJudgeOutcomes(st, buildEarlyWinFailOutcomes(st));
+        }
 
         emitMod("JUDGE_SKIP", { by: ws.meta?.screen ?? "unknown", at: Date.now() });
         emitSfx(st, "skip");
@@ -1582,6 +2239,8 @@ function createWsServer(httpServer) {
 
         st.rules.correctPoints = clampRulePoints(msg.correctPoints);
         st.rules.wrongPoints = clampRulePoints(msg.wrongPoints);
+        st.rules.earlyWinPlacePointRate = clampEarlyWinPlacePointRate(msg.earlyWinPlacePointRate);
+        st.rules.earlyWinFailPoints = clampEarlyWinFailPoints(msg.earlyWinFailPoints);
 
         recomputeScores(st);
         recomputePlayerStatuses(st);
@@ -1648,6 +2307,7 @@ function createWsServer(httpServer) {
         st.ui.showMarkWrong = msg.showMarkWrong !== false;
         st.ui.boardAnswerEnabled = st.boardAnswer.enabled;
         st.ui.boardAnswerVisible = st.boardAnswer.visibleOnVisualizer;
+        st.ui.boardQuizMode = sanitizeBoardQuizMode(st.boardAnswer.mode);
 
         if (st.scoreHiddenVisible) {
           if (st.ui.visualizerSortMode === "rank") {
@@ -1751,9 +2411,7 @@ function createWsServer(httpServer) {
         resetBuzzer(st);
         resetJudge(st);
         st.phase = "lobby";
-        ensureBoardAnswerState(st);
-        st.boardAnswer.responses = {};
-        st.boardAnswer.lastJudged = null;
+        resetBoardAnswerRound(st);
 
         recomputePlayerStatuses(st);
         broadcastState();
@@ -1779,6 +2437,7 @@ function createWsServer(httpServer) {
         const playerId = ws.meta.playerId;
         const player = st.players?.[playerId];
         if (!player) return;
+        if (!canPlayerSubmitBoardAnswer(st, playerId)) return;
 
         const entry = ensureBoardAnswerEntry(st, playerId);
         if (!entry) return;
@@ -1792,98 +2451,33 @@ function createWsServer(httpServer) {
         entry.flag = "";
         entry.submittedAt = hadSubmission ? Number(entry.submittedAt || Date.now()) : Date.now();
         entry.updatedAt = Date.now();
+        entry.opened = false;
+        syncBoardAnswerFlow(st);
         broadcastState();
         return;
       }
 
       if (type === C2S.BUZZ) {
         if (ws.meta.screen !== "player" || !ws.meta.playerId) return;
-
-        // 結果表示中は押せない
-        if (st.phase === "result" || st.judge?.status === "result") return;
-
-        if (!st.buzzer.isOpen) return;
-
         const playerId = ws.meta.playerId;
+        ensureBoardAnswerState(st);
+
+        if (st.phase === "result" || st.judge?.status === "result") return;
+        if (!st.buzzer.isOpen) return;
 
         const buzzMode = getBuzzMode(st);
         if (buzzMode === "cultq" && st.judge?.status === "in_progress") return;
-
-        // 休み中は押せない
         if (!canBuzzNow(st, playerId)) return;
 
-        // 受信時刻
         const recvAt = Date.now();
-
-        // 押下時刻は、端末の同期品質に応じた許容幅に収まる時だけ採用する
-        let at = recvAt;
         const tPress = Number(msg.tPress ?? msg.at);
         const adaptiveSkewMs = getAdaptiveSkewMs(msg.bestRtt);
-        if (Number.isFinite(tPress) && Math.abs(tPress - recvAt) <= adaptiveSkewMs) at = tPress;
+        const effectiveAt =
+          Number.isFinite(tPress) && Math.abs(tPress - recvAt) <= adaptiveSkewMs
+            ? tPress
+            : recvAt;
 
-        // ★重複ガードは「push前」
-        // 同一問で同じ人が2回以上押すのは無視（多重発火・連打対策）
-        if (st.buzzer?.buzzOrder?.some(b => b.playerId === playerId)) {
-          return;
-        }
-
-        // ★ここで1回だけ記録
-        st.buzzer.buzzOrder.push({ playerId, at, recvAt });
-
-        // 着順・着差のために常に時刻順に整列
-        st.buzzer.buzzOrder.sort((a, b) => (a.at - b.at) || (a.recvAt - b.recvAt));
-        recomputeFirstBuzz(st);
-
-        // いま有効なMODがあれば、MODへBUZZイベントを通知
-        const active = String(getState()?.mods?.active || "");
-        if (active) {
-          const rt = getModRuntime();
-          const idx = st.buzzer.buzzOrder.findIndex(b => b.playerId === playerId);
-          const rank = idx >= 0 ? idx + 1 : null;
-
-          rt?.emit?.(active, "BUZZ", {
-            playerId,
-            rank,
-            at,
-            recvAt,
-            phase: st.phase,
-            judgeStatus: st.judge?.status ?? null
-          });
-        }
-
-        // ここから「このBUZZで回答者が立つか？」を判定
-        const wrongSet = st.judge?.wrongSet || {};
-        const existsUnwrongedPlayer = Object.values(st.players || {}).some(
-          p => !wrongSet[p.id]
-        );
-
-        // 「回答者がいない」かつ「まだ誤答してない人がいる」なら、回答開始（buzzer）
-        const willStartResponding =
-          st.judge?.status !== "in_progress" &&
-          existsUnwrongedPlayer;
-
-        if (willStartResponding) {
-          if (!buzzCollectTimer) {
-            st.buzzer.collectSeq = Number(st.buzzer.collectSeq ?? 0) + 1;
-            st.buzzer.collectUntil = recvAt + BUZZ_COLLECTION_WINDOW_MS;
-            const collectSeq = st.buzzer.collectSeq;
-            buzzCollectTimer = setTimeout(() => {
-              finalizeBuzzCollection(collectSeq);
-            }, BUZZ_COLLECTION_WINDOW_MS);
-          }
-
-          broadcastState();
-          return;
-        }
-
-        // それ以外は「2着以下の押下音（push）」
-        // ※この時点で「この押下の順位」が確定している
-        const idx = st.buzzer.buzzOrder.findIndex(b => b.playerId === playerId);
-        if (idx >= 1) {
-          emitSfx(st, "push");
-        }
-
-        broadcastState();
+        performPlayerBuzz(st, playerId, { recvAt, at: effectiveAt });
         return;
       }
 
@@ -1998,6 +2592,9 @@ function createWsServer(httpServer) {
           const command = String(action.command || "").trim();
           if (command === "JUDGE_SKIP") {
             clearPendingBuzzCollection(st);
+            if (isEarlyWinBuzzMode(st)) {
+              queueJudgeOutcomes(st, buildEarlyWinFailOutcomes(st));
+            }
             emitMod("JUDGE_SKIP", { by: "mod_dispatch", at: Date.now() });
             emitSfx(st, "skip");
             setResult(st, { type: "skip" });

@@ -55,6 +55,7 @@ function createDefaultControllerPrefs() {
       rulesOverlayVisible: false,
       boardAnswerEnabled: false,
       boardAnswerVisible: false,
+      boardQuizMode: "standard",
       modThemePrefs: {}
     }
   };
@@ -112,6 +113,8 @@ function sanitizePersistedPrefs(raw) {
       thinkingSeconds: Number.isFinite(Number(rules.thinkingSeconds)) ? Number(rules.thinkingSeconds) : defaults.rules.thinkingSeconds,
       correctPoints: Number.isFinite(Number(rules.correctPoints)) ? Number(rules.correctPoints) : defaults.rules.correctPoints,
       wrongPoints: Number.isFinite(Number(rules.wrongPoints)) ? Number(rules.wrongPoints) : defaults.rules.wrongPoints,
+      earlyWinPlacePointRate: Number.isFinite(Number(rules.earlyWinPlacePointRate)) ? Number(rules.earlyWinPlacePointRate) : defaults.rules.earlyWinPlacePointRate,
+      earlyWinFailPoints: Number.isFinite(Number(rules.earlyWinFailPoints)) ? Number(rules.earlyWinFailPoints) : defaults.rules.earlyWinFailPoints,
       attackStartPoints: Number.isFinite(Number(rules.attackStartPoints)) ? Number(rules.attackStartPoints) : defaults.rules.attackStartPoints,
       attackCorrectDamage: Number.isFinite(Number(rules.attackCorrectDamage)) ? Number(rules.attackCorrectDamage) : defaults.rules.attackCorrectDamage,
       attackWrongDamage: Number.isFinite(Number(rules.attackWrongDamage)) ? Number(rules.attackWrongDamage) : defaults.rules.attackWrongDamage,
@@ -158,6 +161,9 @@ function sanitizePersistedPrefs(raw) {
       rulesOverlayVisible: typeof ui.rulesOverlayVisible === "boolean" ? ui.rulesOverlayVisible : defaults.ui.rulesOverlayVisible,
       boardAnswerEnabled: typeof ui.boardAnswerEnabled === "boolean" ? ui.boardAnswerEnabled : defaults.ui.boardAnswerEnabled,
       boardAnswerVisible: typeof ui.boardAnswerVisible === "boolean" ? ui.boardAnswerVisible : defaults.ui.boardAnswerVisible,
+      boardQuizMode: ["standard", "buzz_to_board", "board_to_buzz", "buzz_plus_board"].includes(String(ui.boardQuizMode || ""))
+        ? String(ui.boardQuizMode)
+        : defaults.ui.boardQuizMode,
       modThemePrefs: sanitizeModThemePrefs(ui.modThemePrefs)
     }
   };
@@ -175,6 +181,10 @@ function applyControllerPrefs(state, rawPrefs) {
   state.boardAnswer = state.boardAnswer || { enabled: false, visibleOnVisualizer: false, responses: {} };
   state.boardAnswer.enabled = !!prefs.ui.boardAnswerEnabled;
   state.boardAnswer.visibleOnVisualizer = !!prefs.ui.boardAnswerVisible;
+  state.boardAnswer.mode = String(prefs.ui.boardQuizMode || "standard");
+  state.boardAnswer.phase = String(state.boardAnswer.phase || "idle");
+  state.boardAnswer.focusedPlayerIds = Array.isArray(state.boardAnswer.focusedPlayerIds) ? state.boardAnswer.focusedPlayerIds : [];
+  state.boardAnswer.buzzStarterPlayerId = state.boardAnswer.buzzStarterPlayerId || null;
   if (!state.boardAnswer.responses || typeof state.boardAnswer.responses !== "object") {
     state.boardAnswer.responses = {};
   }
@@ -212,6 +222,7 @@ function createInitialState() {
       status: "idle",        // "idle" | "in_progress" | "result"
       currentIndex: 0,
       wrongSet: {},          // { [playerId]: true }
+      clearedOrder: [],      // [playerId, ...] 早抜け系の確定順位
       lastResult: null,      // { type: "correct"|"skip"|"all_wrong", playerId? }
       pendingOutcome: {}     // { [playerId]: { correctCount, wrongCount, pendingRestAdd } }
     },
@@ -235,8 +246,12 @@ function createInitialState() {
     boardAnswer: {
       enabled: !!persisted.ui.boardAnswerEnabled,
       visibleOnVisualizer: !!persisted.ui.boardAnswerVisible,
+      mode: String(persisted.ui.boardQuizMode || "standard"),
+      phase: "idle",
       responses: {},
-      lastJudged: null
+      lastJudged: null,
+      focusedPlayerIds: [],
+      buzzStarterPlayerId: null
     },
 
     // player: { id, name, score, correctCount, wrongCount, restCount, pendingRestAdd }

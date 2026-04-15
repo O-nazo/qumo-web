@@ -12,6 +12,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
     st.judge.status = "idle";
     st.judge.currentIndex = 0;
     st.judge.wrongSet = {};
+    st.judge.clearedOrder = [];
     st.judge.lastResult = null;
     st.judge.pendingOutcome = {};
   }
@@ -29,6 +30,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
     correct = 0,
     wrong = 0,
     rest = 0,
+    bonusDelta = 0,
     scoreDelta = 0,
     scoreSet = null,
     forceDisqualify = false
@@ -43,6 +45,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
           correctCount: 0,
           wrongCount: 0,
           pendingRestAdd: 0,
+          bonusDelta: 0,
           scoreDelta: 0,
           scoreSet: null,
           forceDisqualify: false
@@ -51,6 +54,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
     current.correctCount = Number(current.correctCount ?? 0) + (Number(correct) || 0);
     current.wrongCount = Number(current.wrongCount ?? 0) + (Number(wrong) || 0);
     current.pendingRestAdd = Number(current.pendingRestAdd ?? 0) + Math.max(0, Number(rest) || 0);
+    current.bonusDelta = Number(current.bonusDelta ?? 0) + (Number(bonusDelta) || 0);
     current.scoreDelta = Number(current.scoreDelta ?? 0) + (Number(scoreDelta) || 0);
     if (scoreSet != null && Number.isFinite(Number(scoreSet))) {
       current.scoreSet = Number(scoreSet);
@@ -72,6 +76,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
       const correct = Number(outcome.correctCount ?? 0) || 0;
       const wrong = Number(outcome.wrongCount ?? 0) || 0;
       const rest = Math.max(0, Number(outcome.pendingRestAdd ?? 0) || 0);
+      const bonusDelta = Number(outcome.bonusDelta ?? 0) || 0;
       const scoreDelta = Number(outcome.scoreDelta ?? 0) || 0;
       const hasScoreSet = outcome.scoreSet != null && Number.isFinite(Number(outcome.scoreSet));
       const scoreSet = hasScoreSet ? Number(outcome.scoreSet) : null;
@@ -87,6 +92,10 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
       }
       if (rest > 0) {
         player.pendingRestAdd = Number(player.pendingRestAdd ?? 0) + rest;
+        changed = true;
+      }
+      if (bonusDelta !== 0) {
+        player.scoreBonus = Number(player.scoreBonus ?? 0) + bonusDelta;
         changed = true;
       }
       if (scoreDelta !== 0) {
@@ -120,8 +129,14 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
     const m = String(st.rules?.buzzMode ?? "").toLowerCase();
     if (m === "cultq" || m === "cult" || m === "cartq") return "cultq";
     if (m === "single") return "single";
+    if (m === "early_endless" || m === "survival_endless" || m === "hayanuke_endless") return "early_endless";
+    if (m === "early_single" || m === "survival_single" || m === "hayanuke_single") return "early_single";
     if (m === "endless" || m === "all") return "endless";
     return "endless";
+  }
+
+  function getClearedSet(st) {
+    return new Set(Array.isArray(st?.judge?.clearedOrder) ? st.judge.clearedOrder.map((id) => String(id || "")) : []);
   }
 
   function shouldApplyPendingOutcomeOnReset(st) {
@@ -182,6 +197,7 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
   function canBuzzNow(st, playerId) {
     const p = st.players?.[playerId];
     if (!p) return false;
+    if (getClearedSet(st).has(String(playerId || ""))) return false;
     if (Number(p.restCount ?? 0) > 0) return false;
     if (p.modDisabled) return false;
     if (st.judge?.wrongSet?.[playerId]) return false;
@@ -191,10 +207,12 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
 
   function pickNextRespondentIndex(st) {
     const wrongSet = st.judge?.wrongSet || {};
+    const clearedSet = getClearedSet(st);
     const order = st.buzzer?.buzzOrder || [];
     for (let i = 0; i < order.length; i++) {
       const id = order[i]?.playerId;
       if (!id) continue;
+      if (clearedSet.has(String(id))) continue;
       if (wrongSet[id]) continue;
       if (!canBuzzNow(st, id)) continue;
       return i;
@@ -245,9 +263,11 @@ function createBuzzLogic({ recomputeScores, recomputePlayerStatuses }) {
 
   function hasAnyEligiblePlayer(st) {
     const wrongSet = st.judge?.wrongSet || {};
+    const clearedSet = getClearedSet(st);
     return Object.values(st.players || {}).some((p) => {
       const id = p.id;
       if (!id) return false;
+      if (clearedSet.has(String(id))) return false;
       if (Number(p.restCount ?? 0) > 0) return false;
       if (p.modDisabled) return false;
       if (wrongSet[id]) return false;

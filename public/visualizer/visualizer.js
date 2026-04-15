@@ -40,6 +40,7 @@ let mainFrame = null;
 const latestModEvents = new Map();
 const MOD_OVERLAY_WIDTH = 252;
 const MOD_OVERLAY_GUTTER = 28;
+const GRID_BASE_WRAP_COUNT = 3;
 
 function loadMain(modId, options = {}) {
   const id = String(modId || "").trim();
@@ -330,6 +331,19 @@ function setOverlayVisibility(element, visible) {
   overlayFadeTimers.set(element, timer);
 }
 
+function setOverlayVisibilityImmediate(element, visible) {
+  if (!element) return;
+
+  const existingTimer = overlayFadeTimers.get(element);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    overlayFadeTimers.delete(element);
+  }
+
+  element.classList.remove("is-visible", "is-hiding");
+  element.hidden = !visible;
+}
+
 function renderJoinQr(st) {
   const on = !!st.ui?.joinQrVisible;
 
@@ -435,6 +449,36 @@ function renderRulesOverlay(st) {
     .join("");
 }
 
+function renderBoardFocusOverlay(st) {
+  const overlay = document.querySelector("#boardFocusOverlay");
+  const body = document.querySelector("#boardFocusBody");
+  if (!overlay || !body) return;
+
+  const focusedIds = Array.isArray(st?.boardAnswer?.focusedPlayerIds) ? st.boardAnswer.focusedPlayerIds : [];
+  const cards = focusedIds
+    .map((playerId) => {
+      const player = st?.players?.[playerId];
+      const entry = st?.boardAnswer?.responses?.[playerId];
+      if (!player) return "";
+      const result = String(entry?.result || "");
+      const opened = entry?.opened === true;
+      const text = opened ? String(entry?.text || "") : "";
+      const resultClass = result === "correct" ? " is-correct" : result === "wrong" ? " is-wrong" : "";
+      return `
+        <div class="boardFocusCard${resultClass}">
+          <div class="boardFocusTextWrap">
+            <div class="boardFocusText${opened && text ? "" : " is-hidden"}">${text ? escapeHtml(text) : "&nbsp;"}</div>
+          </div>
+          <div class="boardFocusName">${escapeHtml(String(player.name || playerId))}</div>
+        </div>
+      `;
+    })
+    .filter(Boolean);
+
+  body.innerHTML = cards.join("");
+  setOverlayVisibilityImmediate(overlay, cards.length > 0);
+}
+
 function getOrderedConnectedPlayers(st) {
   const playersById = st.players || {};
   const order = Array.isArray(st.ui?.playerOrder) ? st.ui.playerOrder : [];
@@ -488,6 +532,38 @@ function buildConnectionOrderMap(players) {
   return orderMap;
 }
 
+function getDisplayBuzzEntries(st) {
+  const rawMode = String(st?.rules?.buzzMode ?? "").toLowerCase();
+  const isEarlyMode = rawMode === "early_endless" || rawMode === "early_single" || rawMode === "survival_endless" || rawMode === "survival_single" || rawMode === "hayanuke_endless" || rawMode === "hayanuke_single";
+  const buzzOrder = Array.isArray(st?.buzzer?.buzzOrder) ? st.buzzer.buzzOrder : [];
+  if (!isEarlyMode) {
+    return buzzOrder.map((entry, idx) => ({
+      playerId: entry.playerId,
+      at: entry.at,
+      order: idx + 1
+    }));
+  }
+
+  const clearedOrder = Array.isArray(st?.judge?.clearedOrder) ? st.judge.clearedOrder : [];
+  const entries = [];
+  const seen = new Set();
+  clearedOrder.forEach((playerId, idx) => {
+    const key = String(playerId || "");
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    entries.push({ playerId: key, at: null, order: idx + 1 });
+  });
+  let nextOrder = entries.length + 1;
+  for (const entry of buzzOrder) {
+    const key = String(entry?.playerId || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ playerId: key, at: entry?.at ?? null, order: nextOrder });
+    nextOrder += 1;
+  }
+  return entries;
+}
+
 function buildFrozenRankSortedPlayers(st, players, connectionOrderMap) {
   const snapshot = Array.isArray(st.ui?.rankSortOrder) ? st.ui.rankSortOrder : [];
   return buildPlayersFromSnapshot(players, snapshot, connectionOrderMap);
@@ -515,13 +591,55 @@ function buildPlayersFromSnapshot(players, snapshot, connectionOrderMap) {
   return ordered;
 }
 
+function applyAdaptiveGridColumns(grid, playerCount, mode = "full") {
+  if (!(grid instanceof HTMLElement)) return;
+
+  const shouldUseAdaptiveGrid =
+    mode === "full" &&
+    !grid.classList.contains("verticalMode") &&
+    !grid.classList.contains("overlayMode") &&
+    !grid.classList.contains("slimMode");
+
+  if (!shouldUseAdaptiveGrid) {
+    grid.style.removeProperty("grid-template-columns");
+    return;
+  }
+
+  const totalPlayers = Math.max(0, Number(playerCount) || 0);
+  if (totalPlayers <= 0) {
+    grid.style.removeProperty("grid-template-columns");
+    return;
+  }
+
+  const maxColumns = totalPlayers;
+  let columns = Math.min(GRID_BASE_WRAP_COUNT, maxColumns);
+  grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+
+  const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+  const gridRect = grid.getBoundingClientRect();
+  const availableHeight = Math.max(0, viewportHeight - gridRect.top - 12);
+
+  while (columns < maxColumns && grid.scrollHeight > availableHeight) {
+    columns += 1;
+    grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  }
+}
+
 function renderPlayers(st, mode = "full") {
   const grid = document.querySelector("#playersGrid");
   grid.innerHTML = "";
 
   const players = getOrderedConnectedPlayers(st);
   const connectionOrderMap = buildConnectionOrderMap(players);
-  const { orderMap, firstAt } = buildBuzzInfo(st);
+  const { orderMap, firstAt } = (() => {
+    const buzzOrder = getDisplayBuzzEntries(st);
+    const orderMap = new Map();
+    buzzOrder.forEach((entry) => {
+      orderMap.set(entry.playerId, { order: entry.order, at: entry.at });
+    });
+    const firstTimed = buzzOrder.find((entry) => Number.isFinite(Number(entry?.at)));
+    return { orderMap, firstAt: firstTimed ? Number(firstTimed.at) : null };
+  })();
   const ui = st.ui || {};
   const showScore = ui.showScore !== false;
   const showCorrectCount = ui.showCorrectCount !== false;
@@ -602,7 +720,7 @@ function renderPlayers(st, mode = "full") {
     const order = info ? info.order : null;
     const scoreRank = scoreHidden ? null : (rankMap.get(p.id) ?? 1);
     const boardEntry = st.boardAnswer?.responses?.[p.id] || null;
-    const boardText = String(boardEntry?.text || "");
+    const boardText = boardEntry?.opened === true ? String(boardEntry?.text || "") : "";
     const boardResult = String(boardEntry?.result || "");
 
     let gapText = "-";
@@ -748,7 +866,20 @@ function renderPlayers(st, mode = "full") {
 
     grid.appendChild(tile);
   }
+
+  applyAdaptiveGridColumns(grid, sorted.length, mode);
 }
+
+function rerenderVisualizer() {
+  if (!lastState) return;
+  const modActive = !!String(lastState?.mods?.active || "").trim() && lastState?.modScoreboardVisible !== true;
+  const mode = modActive ? "overlay" : "full";
+  renderPlayers(lastState, mode);
+}
+
+window.addEventListener("resize", () => {
+  rerenderVisualizer();
+});
 
 
 client.onState((st) => {
@@ -767,6 +898,7 @@ client.onState((st) => {
 
   renderJoinQr(st);
   renderRulesOverlay(st);
+  renderBoardFocusOverlay(st);
 
   function computeHudMode(_st, modActive) {
     return modActive ? "overlay" : "full";

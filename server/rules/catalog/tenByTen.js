@@ -21,6 +21,7 @@ function createTenByTenRuleDefinition({ clampInt }) {
       initializePlayer(player) {
         player.correctCount = 0;
         player.wrongCount = 10;
+        player.scoreBonus = 0;
         player.manualScoreAdjust = 0;
         player.forceDisqualify = false;
         player.score = 0;
@@ -30,8 +31,9 @@ function createTenByTenRuleDefinition({ clampInt }) {
         for (const p of Object.values(st.players || {})) {
           p.correctCount = clampCorrectPoints(p.correctCount);
           p.wrongCount = clampWrongPoints(p.wrongCount);
+          p.scoreBonus = clampInt(p.scoreBonus, -1000000, 1000000, 0);
           p.manualScoreAdjust = clampInt(p.manualScoreAdjust, -1000000, 1000000, 0);
-          p.score = computeBaseScore(p) + p.manualScoreAdjust;
+          p.score = computeBaseScore(p) + p.manualScoreAdjust + p.scoreBonus;
         }
       },
 
@@ -90,7 +92,7 @@ function createTenByTenRuleDefinition({ clampInt }) {
       },
 
       applyManualScoreEdit(player, _rules, desiredScore) {
-        player.manualScoreAdjust = Number(desiredScore) - computeBaseScore(player);
+        player.manualScoreAdjust = Number(desiredScore) - computeBaseScore(player) - Number(player?.scoreBonus ?? 0);
       }
     }
   };

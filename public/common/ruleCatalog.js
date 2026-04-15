@@ -1,18 +1,24 @@
 const BUZZ_MODE_LABELS = {
-  endless: "エンドレスチャンス(全順位判定)",
-  cultq: "エンドレスチャンス(カルトQ)",
-  single: "シングルチャンス"
+  endless: "エンドレスチャンス",
+  single: "シングルチャンス",
+  cultq: "連打エンドレスチャンス",
+  early_endless: "早抜けエンドレス",
+  early_single: "早抜けシングル"
 };
 
 const BUZZ_MODE_DESCRIPTIONS = {
   endless: "回答者が誤答した場合、ボタンを押した順に回答権が繰り下がります。",
+  single: "ボタンを押した1人にだけ回答権があり、誤答すると問題が終了します。",
   cultq: "回答者が誤答した場合、着順をリセットし再度早押しを判定します。",
-  single: "ボタンを押した1人にだけ回答権があり、誤答すると問題が終了します。"
+  early_endless: "全員が正解するか制限時間まで問題が続きます。",
+  early_single: "誰かが正解しても問題が続きますが、誤答すると回答権を失います。"
 };
 
 function getBuzzModeKey(st) {
   const raw = String(st?.rules?.buzzMode ?? "endless").toLowerCase();
   if (raw === "cultq" || raw === "cult" || raw === "cartq") return "cultq";
+  if (raw === "early_endless" || raw === "survival_endless" || raw === "hayanuke_endless") return "early_endless";
+  if (raw === "early_single" || raw === "survival_single" || raw === "hayanuke_single") return "early_single";
   if (raw === "single") return "single";
   return "endless";
 }

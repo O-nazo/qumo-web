@@ -16,9 +16,11 @@
           <label>
             早押しルール
             <select id="buzzMode" style="width:260px;">
-              <option value="endless">全着順判定（エンドレスチャンス）</option>
-              <option value="cultq">カルトQ方式</option>
+              <option value="endless">エンドレスチャンス</option>
               <option value="single">シングルチャンス</option>
+              <option value="cultq">連打エンドレスチャンス</option>
+              <option value="early_endless">早抜けエンドレス</option>
+              <option value="early_single">早抜けシングル</option>
             </select>
           </label>
         </div>
@@ -55,6 +57,17 @@
             <label>
               誤答時の減加
               <input id="wrongPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
+            </label>
+          </div>
+
+          <div class="row">
+            <label>
+              n抜け加点倍率
+              <input id="earlyWinPlacePointRate" type="number" min="0" max="1000000" step="1" style="width:140px;">
+            </label>
+            <label>
+              未抜け時の減加
+              <input id="earlyWinFailPoints" type="number" min="-1000" max="1000000" step="1" style="width:140px;">
             </label>
           </div>
 
@@ -233,6 +246,27 @@
               <div>参加用URL：</div>
               <span id="joinUrls"></span>
             </div>
+          </div>
+        </div>
+
+        <div class="modalSection">
+          <div class="modalSectionBody">
+            <details class="debugMenuDetails">
+              <summary>デバッグメニュー</summary>
+              <div class="debugMenuBody">
+                <div class="row">
+                  <button id="addDebugPlayer" type="button">仮想追加</button>
+                </div>
+                <div class="row debugBuzzRow">
+                  <label>
+                    仮想早押し人数
+                    <input id="debugBuzzCount" type="number" min="1" max="999" step="1" value="1" style="width:90px;">
+                    人
+                  </label>
+                  <button id="debugSimulateBuzz" type="button">仮想早押し</button>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
 
@@ -430,8 +464,16 @@
               <i class="fa-solid fa-table-list"></i>
             </button>
           </div>
+          <label class="inlineSelect">
+            <span>形式</span>
+            <select id="boardQuizMode">
+              <option value="standard">通常</option>
+              <option value="buzz_to_board">早押し→ボード</option>
+              <option value="board_to_buzz">ボード→早押し</option>
+              <option value="buzz_plus_board">早押し＋ボード</option>
+            </select>
+          </label>
           <button id="boardJudge" type="button">判定</button>
-          <button id="boardAnswerClear" type="button">解答クリア</button>
         </div>
         <div id="playerCount" class="playerCount">0人接続中</div>
       </div>

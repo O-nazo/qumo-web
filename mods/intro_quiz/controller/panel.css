@@ -26,7 +26,7 @@ body {
 }
 
 .wrap {
-  min-width: 980px;
+  min-width: 0;
   min-height: 760px;
   height: max(100dvh, 760px);
   box-sizing: border-box;
@@ -81,8 +81,12 @@ body {
   height: 100%;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.05fr);
   align-items: stretch;
+}
+
+.grid > .card {
+  min-width: 0;
 }
 
 .problemListCard {
@@ -196,6 +200,7 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .transportButtons button {
@@ -284,6 +289,7 @@ body {
 .item .meta {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   color: var(--muted);
   font-size: 12px;
 }
@@ -333,7 +339,66 @@ select:disabled {
   opacity: 0.5;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1280px) {
+  .wrap {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .grid {
+    gap: 12px;
+    grid-template-columns: minmax(248px, 0.92fr) minmax(280px, 1.08fr);
+  }
+
+  .stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .title {
+    font-size: 24px;
+  }
+
+  .answer {
+    font-size: 18px;
+  }
+
+  .card h2,
+  .nowPlaying,
+  .transport,
+  .navRow,
+  .problemListBody {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .grid {
+    grid-template-columns: minmax(220px, 0.9fr) minmax(240px, 1.1fr);
+  }
+
+  button,
+  select {
+    padding: 8px 10px;
+  }
+
+  .transportButtons button {
+    min-width: 44px;
+    padding: 0 10px;
+  }
+
+  .title {
+    font-size: 21px;
+  }
+
+  .artist,
+  .metaSub,
+  .answer,
+  .notes,
+  .item .itemAnswer {
+    font-size: 13px;
+  }
+
   .problemListBody {
     min-height: 240px;
   }

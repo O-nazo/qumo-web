@@ -130,6 +130,19 @@ body {
   letter-spacing: 0.01em;
 }
 
+.indicatorInput.boardAnswerInput[readonly] {
+  background: #d9dde3;
+  color: #5b6470;
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.12);
+  cursor: not-allowed;
+}
+
+body.backgroundDarkTheme .indicatorInput.boardAnswerInput[readonly] {
+  background: #3a404a;
+  color: #d8dee8;
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
 /* 赤丸ボタン */
 .bigBtn {
   width: min(360px, 70vw);
@@ -204,6 +217,24 @@ body {
 
 .label { opacity: 0.75; }
 .value { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+.pointRankValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pointRankValue.is-first {
+  color: #d4a100;
+}
+
+.pointRankCrown {
+  width: 14px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0 14px;
+}
 
 .nameValueWrap {
   display: inline-flex;
